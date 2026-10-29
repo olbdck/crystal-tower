@@ -102,7 +102,7 @@ export function enemyTypeAt(w, i, pc) {
 export const CARD_EVERY = 3;
 // Cards make the team stronger every CARD_EVERY waves; enemies get tougher to match, more so with more
 // players (more cards at the table). Tuned with seeded bot games: npm run balance.
-const CARD_HP = [0.02, 0.05, 0.05, 0.05, 0.06];
+const CARD_HP = [0.1, 0.08, 0.065, 0.055, 0.06];
 export function hpScale(w, pc) {
   const x = w - 1, cards = Math.floor(x / CARD_EVERY);
   return (1 + 0.31 * x + 0.037 * x * x) * (0.6 + 0.4 * pc) * (1 + CARD_HP[Math.min(5, Math.max(1, pc)) - 1] * cards);
@@ -114,14 +114,23 @@ export function waveMix(w, pc) {
   return c;
 }
 
-export function synergyAt(towers, tw) {
-  const x = tw.c % COLS, y = (tw.c / COLS) | 0, owners = new Set();
+/** At most this many of the synergy bonuses can come from the owner's own towers ("Єдність"). */
+export const OWN_SYN_MAX = 2;
+/**
+ * How many synergy bonuses a tower gets (0-4): one for every other player with a tower on the 8 cells
+ * around it, and, with ownTypes (the "Єдність" card), one for every other tower type of its owner there
+ * (up to OWN_SYN_MAX).
+ */
+export function synergyAt(towers, tw, ownTypes = false) {
+  const x = tw.c % COLS, y = (tw.c / COLS) | 0, owners = new Set(), types = new Set();
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
     if (!dx && !dy) continue;
     const nx = x + dx, ny = y + dy;
     if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
     const nb = towers.get(ny * COLS + nx);
-    if (nb && nb.o !== tw.o) owners.add(nb.o);
+    if (!nb) continue;
+    if (nb.o !== tw.o) owners.add(nb.o);
+    else if (ownTypes && nb.ty !== tw.ty) types.add(nb.ty);
   }
-  return owners.size;
+  return Math.min(4, owners.size + Math.min(OWN_SYN_MAX, types.size));
 }

@@ -23,6 +23,7 @@ Keys: `1–4` towers, `5–7` spells, `U` upgrade, `S` sell, `R` ready, `Esc` ca
 
 After every third wave (3, 6, … 18) each player picks 1 of 3 cards, drawn for them alone. The pick has to be made before pressing ready.
 
+- **Єдність (Unity)** is offered at every pick until you take it: your own towers of different types next to each other give each other synergy (+15% per other type, up to +30%). It matters most when playing alone, where there are no other players' towers to team up with.
 - **Passive cards** stay for the rest of the game and act on your own towers or on what you pay: cheaper Archers or upgrades, longer frost, a wider cannon blast, one more lightning jump, +10% range or damage, a better refund when selling. They show as small icons next to your name.
 - **Spells** cost gold, are cast once during a wave and then disappear (up to 3 in hand): Fireball, Blizzard (everyone slowed), Earthquake (enemies pushed back), Crystal Power (+3 lives), Overcharge (a tower fires twice as fast for 8 s) and Gold Rush (double kill share for 10 s). Damage grows with the waves.
 - Enemies get a little tougher after each card pick, more so with more players, so the cards add choices rather than make the game easy.

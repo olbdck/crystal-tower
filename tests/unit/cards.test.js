@@ -28,7 +28,8 @@ test("every third wave each player is offered three different cards, a passive a
     assert.ok(o.some(isSpellCode) && o.some(c => !isSpellCode(c)));
   }
   assert.notDeepEqual(sim.offer[0], sim.offer[1], "players get different offers");
-  assert.ok(!drawOffer(6, 0, 0b11111111, 1).some(c => !isSpellCode(c)), "owned passives are not offered again");
+  assert.ok(!drawOffer(6, 0, 0b111111111, 1).some(c => !isSpellCode(c)), "owned passives are not offered again");
+  for (let w = 3; w <= 18; w += 3) for (let seat = 0; seat < 5; seat++) assert.ok(drawOffer(w, seat, 0b011111111 & ~(1 << (w % 8)), w).includes(P.unity), "Єдність comes every time until taken");
 });
 
 test("a card on offer must be picked before getting ready", () => {
@@ -88,4 +89,19 @@ test("cards survive a keyframe", () => {
   const copy = decodeKeyframe(encodeKeyframe(sim, { e: 1, seq: 0, build: "t" })).sim;
   assert.equal(copy.stateHash(), sim.stateHash());
   assert.deepEqual([copy.pv, copy.hand, copy.offer, copy.gr], [sim.pv, sim.hand, sim.offer, sim.gr]);
+});
+
+test("Єдність gives synergy between your own towers of different types", async () => {
+  const { synergyAt } = await import("../../src/sim/rules.js");
+  const sim = table(1), a = 5 * COLS + 4, b = 5 * COLS + 5, c = 5 * COLS + 6;
+  sim.gold[0] = 1000;
+  act(sim, 0, "b", a, 0); act(sim, 0, "b", b, 2); act(sim, 0, "b", c, 0);
+  assert.equal(sim.syn.get(b), 0, "alone, no synergy without the card");
+  sim.offer[0] = [P.unity, SPELL_BASE, SPELL_BASE + 1];
+  act(sim, 0, "k", 0);
+  assert.equal(sim.syn.get(b), 1, "frost next to archers: one other type");
+  assert.equal(sim.syn.get(a), 1);
+  act(sim, 0, "b", 6 * COLS + 5, 1);
+  assert.equal(sim.syn.get(b), 2, "archers and a cannon around the frost");
+  assert.equal(synergyAt(sim.towers, sim.towers.get(a)), 0, "without the card nothing counts");
 });

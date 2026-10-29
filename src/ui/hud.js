@@ -1,7 +1,7 @@
 // The heads-up display: connection plaque, wave banner, crystal, ready button, gold and cards,
 // the selected tower panel, the party list and the end-of-game sign.
-import { MAX_SEATS, MAX_WAVES, START_LIVES, TOWERS, ENEMIES, GIFT, SYN_BONUS, waveTotal, waveBosses, waveMix } from "../sim/rules.js";
-import { buildCost, upCost, sellFor, towerStatsFor } from "../sim/cards.js";
+import { MAX_SEATS, MAX_WAVES, START_LIVES, TOWERS, ENEMIES, GIFT, SYN_BONUS, OWN_SYN_MAX, waveTotal, waveBosses, waveMix } from "../sim/rules.js";
+import { P, buildCost, upCost, sellFor, towerStatsFor } from "../sim/cards.js";
 import { TEST } from "../config.js";
 import { S } from "../state.js";
 import { act, advertise, nameOfPeer } from "../net/session.js";
@@ -158,8 +158,8 @@ export function updateUI(v, now) {
       sell.disabled = tw.o !== seat;
       $("selNote").textContent = tw.o === seat ? "" : "Покращення за ваше золото. За вбивства половина нагороди йде власнику, решта ділиться між усіма.";
       const sl = $("selSyn"); sl.textContent = "";
-      const rel = otherOwners(v.tmap, tw.c, tw.o);
-      if (rel.owners.size) {
+      const rel = otherOwners(v.tmap, tw.c, tw.o, tw.ty, tw.o >= 0 && !!(opv & (1 << P.unity)));
+      if (rel.owners.size || rel.types.size) {
         sl.append("Підсилюють:");
         for (const o of rel.owners) {
           const w = document.createElement("span"); w.className = "who";
@@ -167,7 +167,13 @@ export function updateUI(v, now) {
           w.append(dot, o < 0 ? "нічиї вежі" : v.seats[o] ? nameOfPeer(v.seats[o]) : "вільне місце");
           sl.appendChild(w);
         }
-      } else sl.append(v.seats.filter(Boolean).length > 1 ? "Поставте поруч вежу іншого гравця: +15% за кожного." : "Синергія з’явиться, коли поруч стоятимуть вежі інших гравців.");
+        if (rel.types.size) {
+          const w = document.createElement("span"); w.className = "who";
+          const dot = document.createElement("i"); dot.style.setProperty("--c", SEAT_CSS[tw.o] || "#9b8a70");
+          w.append(dot, `свої вежі інших типів (${Math.min(rel.types.size, OWN_SYN_MAX)})`);
+          sl.appendChild(w);
+        }
+      } else sl.append(opv & (1 << P.unity) ? "Поставте поруч свою вежу іншого типу або вежу іншого гравця: +15% за кожну." : v.seats.filter(Boolean).length > 1 ? "Поставте поруч вежу іншого гравця: +15% за кожного." : "Синергія з’явиться з карткою «Єдність» або коли поруч стоятимуть вежі інших гравців.");
       const lb = document.createElement("button"); lb.type = "button"; lb.className = "linkbtn"; lb.textContent = "Як працює синергія";
       lb.addEventListener("click", openSyn);
       sl.appendChild(lb);

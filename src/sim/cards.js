@@ -15,6 +15,8 @@ export const PASSIVES = [
   { key: "eye", name: "Гострий зір", desc: "Ваші вежі бачать на 10% далі" },
   { key: "trade", name: "Торговець", desc: "Продаж ваших веж повертає 80% замість 65%" },
   { key: "temper", name: "Загартування", desc: "Ваші вежі б’ють на 10% сильніше" },
+  // offered every time until taken: it gives synergy to a player alone at the table
+  { key: "unity", name: "Єдність", desc: "Ваші вежі підсилюють одна одну: +15% за кожен інший тип вашої вежі поруч", always: true },
 ];
 // Spells: cheaper than a strong tower, one use, only while a wave is on. Damage grows with the waves.
 export const SPELLS = [
@@ -28,7 +30,7 @@ export const SPELLS = [
 export const P = Object.fromEntries(PASSIVES.map((c, i) => [c.key, i]));
 export const SP = Object.fromEntries(SPELLS.map((c, i) => [c.key, i]));
 
-// Card codes in offers: 0-7 passives, 8-13 spells.
+// Card codes in offers: passives first (0-8), then spells (9-14).
 export const SPELL_BASE = PASSIVES.length;
 export const isSpellCode = code => code >= SPELL_BASE;
 export function cardOf(code) {
@@ -58,7 +60,8 @@ export const cardWave = w => w > 0 && w % CARD_EVERY === 0 && w < MAX_WAVES;
 
 /**
  * Three different cards for one seat after wave w: at least one passive the player does not have yet
- * (while any are left) and at least one spell, in a shuffled order. `salt` varies it between games.
+ * (while any are left) and at least one spell, in a shuffled order. "Єдність" is among them every time
+ * until the player takes it. `salt` varies it between games.
  */
 export function drawOffer(w, seat, pv, salt) {
   const r = k => hash01(w * 7919 + seat * 104729 + k * 613 + salt * 31);
@@ -66,6 +69,8 @@ export function drawOffer(w, seat, pv, salt) {
   const passives = shuffle(PASSIVES.map((_, i) => i).filter(i => !(pv & (1 << i))), 1);
   const spells = shuffle(SPELLS.map((_, i) => SPELL_BASE + i), 50);
   const out = [];
+  const must = passives.indexOf(P.unity);
+  if (must > 0) passives.unshift(passives.splice(must, 1)[0]);
   if (passives.length) out.push(passives.shift());
   out.push(spells.shift());
   const rest = shuffle([...passives, ...spells], 100);

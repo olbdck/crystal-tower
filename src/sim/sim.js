@@ -5,7 +5,7 @@
 import {
   BLOCKED, BREAK_TIME, COLS, CRYSTAL, DRIP_EVERY, ENEMIES, GIFT, KILL_SHARE, dripCap, waveBonus, MAX_ENEMIES, MAX_SEATS, MAX_TOWERS, MAX_WAVES, PATHS, ROWS, SEAT_GRACE, NO_OWNER, SLOW_FACTOR, START_GOLD, START_LIVES, SYN_BONUS, TOWERS, enemyTypeAt, hpScale, posAt, sellValue, spawnInterval, synergyAt, towerStats, upgradeCost, waveTotal,
 } from "./rules.js";
-import { HAND_MAX, SPELLS, SPELL_BASE, SP, buildCost, cardWave, drawOffer, isSpellCode, sellFor, towerStatsFor, upCost } from "./cards.js";
+import { HAND_MAX, SPELLS, SPELL_BASE, SP, buildCost, cardWave, drawOffer, has, isSpellCode, sellFor, towerStatsFor, upCost } from "./cards.js";
 
 const F64 = new Float64Array(1), W32 = new Uint32Array(F64.buffer);
 // FNV-1a over the exact bits of a number
@@ -63,7 +63,7 @@ export class Sim {
     for (const k of [...this.ak.keys()]) if (expired(k)) this.ak.delete(k);
     for (const k of [...this.gone.keys()]) if (expired(k)) this.gone.delete(k);
   }
-  clearCards(i) { this.pv[i] = 0; this.hand[i] = []; this.offer[i] = []; this.gr[i] = 0; }
+  clearCards(i) { const had = this.pv[i]; this.pv[i] = 0; this.hand[i] = []; this.offer[i] = []; this.gr[i] = 0; if (had) this.recomputeSyn(); }
   freeSeat(i) {
     this.seats[i] = ""; this.ready[i] = false; this.clearCards(i);
     this.u &= ~(1 << i);
@@ -75,7 +75,7 @@ export class Sim {
   present() { return this.occupied().filter(i => !this.gone.has(this.seats[i])); }
   recomputeSyn() {
     this.syn = new Map();
-    for (const tw of this.towers.values()) this.syn.set(tw.c, synergyAt(this.towers, tw));
+    for (const tw of this.towers.values()) this.syn.set(tw.c, synergyAt(this.towers, tw, tw.o >= 0 && has(this.pv[tw.o], "unity")));
   }
   apply(seat, it) {
     const code = it[1];
@@ -122,7 +122,7 @@ export class Sim {
     if (isSpellCode(code)) {
       this.hand[seat].push(code - SPELL_BASE);
       if (this.hand[seat].length > HAND_MAX) this.hand[seat].shift();
-    } else this.pv[seat] |= 1 << code;
+    } else { this.pv[seat] |= 1 << code; this.recomputeSyn(); }
     this.offer[seat] = [];
   }
   /** Casts spell number `idx` from the hand; `target` is a cell for spells that need one. Only during a wave. */

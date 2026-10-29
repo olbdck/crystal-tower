@@ -14,7 +14,7 @@ import { BLOCKED, COLS, ENEMIES, MAX_SEATS, MAX_WAVES, NO_OWNER, PATHS, ROWS, TO
 
 export const MSG_KEYFRAME = 1, MSG_BATCH = 2, MSG_REQ = 3, MSG_BUNDLE = 4;
 export const OP_TICK = 1, OP_ROSTER = 2, OP_ACT = 3, OP_HASH = 4;
-const FORMAT = 3; // 2: wave timer for the crystal's gold drip; 3: cards
+const FORMAT = 4; // 2: wave timer for the crystal's gold drip; 3: cards; 4: the "Єдність" card
 const MAX_ROSTER = 32, MAX_LABEL = 24, MAX_ARGS = 3;
 
 const te = new TextEncoder(), td = new TextDecoder();

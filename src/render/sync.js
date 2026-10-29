@@ -2,7 +2,8 @@
 // the crystal, the build cursor and teammates' pointers.
 import * as THREE from "three";
 import { COLS, ROWS, CRYSTAL, START_LIVES, TOWERS, ENEMIES, BLOCKED, SLOW_FACTOR, posAt, towerStats } from "../sim/rules.js";
-import { SPELLS, buildCost, towerStatsFor } from "../sim/cards.js";
+import { SPELLS, buildCost, has, towerStatsFor } from "../sim/cards.js";
+import { OWN_SYN_MAX } from "../sim/rules.js";
 import { MAT, SEAT_HEX, col, geo, part, mergeGeos } from "./gfx.js";
 import { towerModel } from "./models.js";
 import { placeTower, removeTower, towerTop, updateTowerInstances, updateEnemyInstances, ENEMY_HEIGHT } from "./instancing.js";
@@ -132,23 +133,33 @@ export function syncSynergy(v) {
   }
   for (let n = 1; n <= 4; n++) if (byLevel[n].length) synRoot.add(new THREE.Mesh(mergeGeos(byLevel[n]), MAT.aura[n]));
 }
-export function otherOwners(tmap, cell, owner) {
-  const x = cell % COLS, y = (cell / COLS) | 0, owners = new Set(), partners = [], own = [];
+/**
+ * Towers around a cell that give it synergy: other players' towers, and with `unity` ("Єдність") the
+ * owner's own towers of another type than `ty`. count matches synergyAt in the rules.
+ */
+export function otherOwners(tmap, cell, owner, ty = -1, unity = false) {
+  const x = cell % COLS, y = (cell / COLS) | 0, owners = new Set(), types = new Set(), partners = [], own = [];
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
     if (!dx && !dy) continue;
     const nx = x + dx, ny = y + dy;
     if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
     const nb = tmap.get(ny * COLS + nx);
     if (!nb) continue;
-    if (nb.o !== owner) { owners.add(nb.o); partners.push(nb); } else own.push(nb);
+    if (nb.o !== owner) { owners.add(nb.o); partners.push(nb); }
+    else { own.push(nb); if (unity && nb.ty !== ty) { types.add(nb.ty); partners.push(nb); } }
   }
-  return { owners, partners, own };
+  return { owners, types, partners, own, count: Math.min(4, owners.size + Math.min(OWN_SYN_MAX, types.size)) };
 }
-// What a new tower of `owner` on `cell` would get, and which neighbouring towers it would strengthen.
-export function synergyPreview(v, cell, owner) {
-  const r = otherOwners(v.tmap, cell, owner);
-  const boosted = r.partners.filter(nb => { const o = otherOwners(v.tmap, nb.c, nb.o).owners; return !o.has(owner) && o.size < 4; });
-  return { count: Math.min(4, r.owners.size), partners: r.partners, own: r.own, boosted };
+const unityOf = (v, o) => o >= 0 && has(v.pv[o], "unity");
+// What a new tower of `owner` and type `ty` on `cell` would get, and which neighbouring towers it would strengthen.
+export function synergyPreview(v, cell, owner, ty) {
+  const unity = unityOf(v, owner), r = otherOwners(v.tmap, cell, owner, ty, unity);
+  const boosted = r.partners.filter(nb => {
+    if ((v.syn.get(nb.c) || 0) >= 4) return false;
+    if (nb.o === owner) return !otherOwners(v.tmap, nb.c, nb.o, nb.ty, true).types.has(ty);
+    return !otherOwners(v.tmap, nb.c, nb.o).owners.has(owner);
+  });
+  return { count: r.count, partners: r.partners, own: r.own, boosted };
 }
 function linkMesh(fromCell, cells, mat, w) {
   const box = geo("linkNI", () => new THREE.BoxGeometry(1, 1, 1).toNonIndexed());
@@ -240,7 +251,7 @@ export function updateCursor(v, now) {
       MAT.ghost.color.copy(col(ok ? myHex : 0x6b6259));
       MAT.ghost.opacity = ok ? 0.55 : 0.35;
       showRange(hc, towerStatsFor(S.buildType, 1, pvOf(seat)).range, ok ? 0xfff1bd : 0xff3b30);
-      const pv = synergyPreview(v, hc, seat);
+      const pv = synergyPreview(v, hc, seat, S.buildType);
       synHint = { kind: "build", cell: hc, ty: S.buildType, ...pv };
       synKeyNow = `b${hc}|${seat}|${synKey}`;
       setSynPreview(synKeyNow, () => [zoneMesh(hc), linkMesh(hc, pv.partners.map(t => t.c), MAT.linkHot, 0.1)]);
@@ -258,8 +269,8 @@ export function updateCursor(v, now) {
       d.nextRing.material.opacity = 0.65 + Math.sin(now * 0.01) * 0.25;
     }
     if (!synKeyNow) {
-      const r = otherOwners(v.tmap, S.selCell, st.o);
-      synHint = { kind: "sel", cell: S.selCell, count: Math.min(4, r.owners.size), partners: r.partners };
+      const r = otherOwners(v.tmap, S.selCell, st.o, st.ty, unityOf(v, st.o));
+      synHint = { kind: "sel", cell: S.selCell, count: v.syn.get(S.selCell) || 0, partners: r.partners };
       synKeyNow = `s${S.selCell}|${synKey}`;
       setSynPreview(synKeyNow, () => [linkMesh(S.selCell, r.partners.map(t => t.c), MAT.linkHot, 0.1)]);
       r.partners.slice(0, 8).forEach((t, i) => {

@@ -6,7 +6,7 @@ test("a card pick opens by itself, and spells are cast from the hand during a wa
   const a = await openGame(browser);
   await sitDown(a.page, "Олег");
   await waitView(a.page, v => v.host);
-  const P = { temper: 7 }, SP = { storm: 1 }, base = 8; // codes from src/sim/cards.js
+  const P = { temper: 7 }, SP = { storm: 1 }, base = 9; // codes from src/sim/cards.js
   await a.page.evaluate(([p, s]) => { window.__kv.S.sim.offer[0] = [p, s, 8]; }, [P.temper, base + SP.storm]);
   await expect(a.page.locator("#cardOverlay")).toBeVisible();
   await expect(a.page.locator("#readyLbl")).toHaveText("Карта");

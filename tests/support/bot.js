@@ -6,7 +6,7 @@ import { Sim } from "../../src/sim/sim.js";
 import { TOWERS, PATHS, BLOCKED, COLS, ROWS, STEP, START_LIVES, posAt, upgradeCost } from "../../src/sim/rules.js";
 import { P, SP, SPELLS, isSpellCode } from "../../src/sim/cards.js";
 
-const PREFER = ["temper", "eye", "archer", "craft", "powder", "arc", "winter", "trade"].map(k => P[k]);
+const PREFER = ["unity", "temper", "eye", "archer", "craft", "powder", "arc", "winter", "trade"].map(k => P[k]);
 /**
  * A bot's card play: takes the most useful passive on offer (else the first spell) and casts spells
  * when they help. `act(...args)` sends one action for this seat.
