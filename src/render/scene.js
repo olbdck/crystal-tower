@@ -172,6 +172,10 @@ export function fitCamera() {
   let lo = 3, hi = 160;
   for (let i = 0; i < 36; i++) { const d = (lo + hi) / 2; place(d); const bb = bounds(); if (bb.x1 - bb.x0 <= sw && bb.y1 - bb.y0 <= shh) hi = d; else lo = d; }
   place(hi);
+  // fog fades the room behind the table; it follows the camera, which sits much farther back on narrow
+  // phone screens (with a fixed range the whole table used to vanish into the fog there)
+  if (scene.fog) { scene.fog.near = hi - 5; scene.fog.far = hi + 27; }
+  camera.far = Math.max(200, hi + 80); camera.updateProjectionMatrix();
   const bb = bounds();
   const cxN = (bb.x0 + bb.x1) / 2, cyN = (bb.y0 + bb.y1) / 2;
   const dX = ((safe.l + (W - safe.r)) / 2) / W * 2 - 1, dY = 1 - ((safe.t + (H - safe.b)) / 2) / H * 2;

@@ -5,7 +5,7 @@ import { S } from "./state.js";
 import { initNet, pump, setFxHandler, act, inviteLink, hostDebug, joinedPeers } from "./net/session.js";
 import { getView } from "./net/view.js";
 import { SEAT_CSS } from "./render/gfx.js";
-import { initThree, render3D, renderer, resizeAll, fitCamera, measureSafe, lastSafe, trackPerf, stage } from "./render/scene.js";
+import { initThree, render3D, renderer, scene, camera, resizeAll, fitCamera, measureSafe, lastSafe, trackPerf, stage } from "./render/scene.js";
 import { spawnFx, fxStats } from "./render/fx.js";
 import { $ } from "./ui/dom.js";
 import { updateUI, invalidateParty } from "./ui/hud.js";
@@ -47,4 +47,4 @@ function boot() {
 boot();
 
 // End-to-end tests drive the game through this handle; it exists only when a test set window.KV_TEST.
-if (TEST && Object.keys(TEST).length) window.__kv = { S, act, getView, inviteLink, hostDebug, joinedPeers, renderer: () => renderer, rules: R, fxStats };
+if (TEST && Object.keys(TEST).length) window.__kv = { S, act, getView, inviteLink, hostDebug, joinedPeers, renderer: () => renderer, scene: () => scene, camera: () => camera, rules: R, fxStats };

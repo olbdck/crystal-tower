@@ -433,6 +433,15 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
   .card.sel { transform: translateY(-16px) scale(1.05); }
   .toast { top: 64px; font-size: 14px; }
 }
+/* phones: the wave banner gets its own row under the plaque and the crystal */
+@media (max-width: 560px) {
+  .topbar { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "left . gem" "banner banner banner"; row-gap: 4px; }
+  .topleft { grid-area: left; }
+  .lifegem { grid-area: gem; }
+  .banner { grid-area: banner; justify-self: center; width: min(100%, 340px); padding-block: 4px; }
+  .banner .wave { font-size: 19px; }
+  .banner .sub { font-size: 13px; }
+}
 @media (max-height: 640px) and (min-aspect-ratio: 1/1) {
   .card { width: 104px; }
   .card .txt { display: none; }
