@@ -18,6 +18,14 @@ The in-game interface is in Ukrainian.
 
 Keys: `1–4` towers, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
 
+## Synergy
+
+A tower deals +15% damage for every *other* player whose tower stands on one of the 8 cells around it (diagonals count), up to +60%. Several towers of the same player count once, and your own towers do not count. The bonus is mutual: building next to a friend's tower strengthens theirs too.
+
+- While choosing a spot, the label above the tower preview shows the bonus it would get and its boosted damage, and the towers it would strengthen are marked underneath.
+- Towers with a bonus have a golden aura that gets brighter as the bonus grows; selecting a tower highlights the towers that boost it.
+- The bonus multiplies damage for every tower type: each arrow, the cannon blast and its splash, frost damage (slow duration stays the same), and every lightning jump.
+
 ## How it works
 
 - The whole game is a single `index.html` file. Three.js and MQTT.js load from a CDN.
