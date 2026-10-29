@@ -134,7 +134,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 .coin-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: radial-gradient(circle at 35% 30%, var(--gold-3), var(--gold-1) 60%, var(--gold-0)); box-shadow: 0 0 0 1px var(--wood-0); vertical-align: -1px; margin-right: 3px; }
 .hero .tick { position: absolute; left: 40px; top: -6px; z-index: 2; width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #d6ffc8, var(--ok) 55%, #2c6b20); box-shadow: 0 0 0 2px var(--wood-0), 0 0 10px var(--ok); display: grid; place-items: center; }
 .hero .tick svg { width: 13px; height: 13px; }
-.hero .tag { font-family: var(--font-label); font-size: 11px; color: var(--parch-0); }
+.hero .tag { font-family: var(--font-label); font-size: 11px; color: var(--parch-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lnk.ok { color: #8fe07a; } .lnk.turn { color: var(--gold-2); } .lnk.slow { color: #ff8a7a; } .lnk.wait { color: var(--parch-0); }
+.lnkdot { position: absolute; left: 44px; top: 42px; z-index: 2; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 2px var(--wood-0); background: var(--parch-0); }
+.lnkdot.ok { background: #6fd25a; } .lnkdot.turn { background: var(--gold-1); } .lnkdot.slow { background: #e2483c; }
 .hero .gift {
   position: absolute; right: -6px; top: 50%; transform: translateY(-50%); z-index: 2;
   border: 0; border-radius: 12px; padding: 2px 7px; cursor: pointer; font-family: var(--font-label); font-size: 12px; color: var(--wood-0);
@@ -371,6 +374,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
   .plate small { font-size: 11px; gap: 4px; }
   .plate small i, .hero .tag { display: none; }
   .hero .tick { left: 32px; top: -4px; width: 18px; height: 18px; }
+  .lnkdot { left: 33px; top: 30px; width: 10px; height: 10px; }
   .hero .gift { right: auto; left: 34px; top: 26px; transform: none; padding: 1px 5px; font-size: 10.5px; }
   .spec { display: none; }
   .hero .inv { grid-template-columns: 1fr; justify-items: center; }
@@ -686,7 +690,7 @@ class Sim {
     this.kills = [0, 0, 0, 0, 0];
     this.ready = [false, false, false, false, false];
     for (let i = 0; i < MAX_SEATS; i++) if (this.seats[i]) this.u |= 1 << i;
-    this.towers = new Map(); this.enemies = []; this.nid = 1; this.syn = new Map();
+    this.towers = new Map(); this.enemies = []; this.nid = 1; this.syn = new Map(); this.tv = (this.tv || 0) + 1;
   }
   occupied() { const r = []; for (let i = 0; i < MAX_SEATS; i++) if (this.seats[i]) r.push(i); return r; }
   assignSeats(joinedSorted) {
@@ -722,19 +726,19 @@ class Sim {
       const cost = TOWERS[ty].cost;
       if (this.gold[seat] < cost) return;
       this.gold[seat] -= cost;
-      this.towers.set(cell, { c: cell, ty, lv: 1, o: seat, cd: 0 });
+      this.towers.set(cell, { c: cell, ty, lv: 1, o: seat, cd: 0 }); this.tv++;
       this.recomputeSyn();
     } else if (code === "u") {
       const tw = this.towers.get(it[2]);
       if (!tw || tw.lv >= 3 || this.ph > 2) return;
       const cost = upgradeCost(tw.ty, tw.lv);
       if (this.gold[seat] < cost) return;
-      this.gold[seat] -= cost; tw.lv++;
+      this.gold[seat] -= cost; tw.lv++; this.tv++;
     } else if (code === "s") {
       const tw = this.towers.get(it[2]);
       if (!tw || tw.o !== seat || this.ph > 2) return;
       this.gold[seat] += sellValue(tw.ty, tw.lv);
-      this.towers.delete(tw.c); this.recomputeSyn();
+      this.towers.delete(tw.c); this.recomputeSyn(); this.tv++;
     } else if (code === "r") {
       if (this.ph === 1) this.ready[seat] = !!it[2];
     } else if (code === "g") {
@@ -921,12 +925,14 @@ function synergyAt(towers, tw) {
 }
 /*SIM-END*/
 
-/* ===================== NETWORK TRANSPORT (MQTT over secure WebSocket) ===================== */
-// Players exchange their state through a public MQTT broker over WSS, which works from any network
-// (no direct browser-to-browser connection, so strict NAT on mobile or home networks is not a problem).
-// Each player publishes one retained "presence" message per table; the broker's last-will clears it on disconnect.
-// The first letter of a table code says which broker the table lives on, so friends always land on the same one.
-// To use your own broker, list it first, e.g. { id: "x", url: "wss://mqtt.example.com:8084/mqtt" }.
+/* ===================== NETWORK TRANSPORT (WebRTC mesh + MQTT) ===================== */
+// Players talk directly browser-to-browser over WebRTC data channels, one channel per pair of players.
+// A public MQTT broker over WSS is used only to find each other, to exchange the connection offers
+// (signaling), as a slow fallback path when a direct channel cannot be made, and to keep a copy of each
+// player's state for whoever joins next.
+// ICE: Google STUN finds the public address; when a strict NAT blocks a direct path, a TURN server relays it.
+// By default the free shared Open Relay TURN (Metered) is used. For better reliability add your own TURN,
+// e.g. ExpressTURN or a Metered API key, below.
 const NET_CONFIG = Object.assign({
   topicRoot: "crystal-tower/v1",
   brokers: [
@@ -934,9 +940,17 @@ const NET_CONFIG = Object.assign({
     { id: "h", url: "wss://broker.hivemq.com:8884/mqtt" },
     { id: "m", url: "wss://test.mosquitto.org:8081" },
   ],
+  p2p: true,
+  stun: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"],
+  // Free shared relay with time-limited credentials derived from a public secret (TURN REST API).
+  openRelay: { host: "staticauth.openrelay.metered.ca", secret: "openrelayprojectsecret" },
+  // Your own TURN servers, e.g. [{ urls: "turn:YOUR.expressturn.com:3478", username: "...", credential: "..." }]
+  turn: [],
+  // Optional Metered app: fetches fresh TURN servers nearest to each player.
+  metered: { app: "", apiKey: "" },
 }, window.KV_NET_CONFIG || {});
 
-const PEER_STALE_MS = 60000, HEARTBEAT_MS = 4000;
+const PEER_STALE_MS = 60000, MQTT_BG_MS = 2000, LINK_TIMEOUT_MS = 16000, LINK_RETRY_MS = 20000;
 
 function randLabel() {
   const a = new Uint8Array(10), abc = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -956,15 +970,40 @@ function brokerFor(name) {
 }
 const generatedHere = new Set();
 
+let iceCache = null;
+async function iceServers() {
+  if (iceCache) return iceCache;
+  const list = (NET_CONFIG.stun || []).map(u => ({ urls: u }));
+  for (const t of NET_CONFIG.turn || []) list.push(t);
+  const m = NET_CONFIG.metered || {};
+  if (m.app && m.apiKey) {
+    try {
+      const r = await fetch(`https://${m.app}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(m.apiKey)}`);
+      if (r.ok) { const extra = await r.json(); if (Array.isArray(extra)) list.push(...extra.slice(0, 3)); }
+    } catch (_) {}
+  }
+  const o = NET_CONFIG.openRelay;
+  if (o && o.host && o.secret && window.crypto && crypto.subtle) {
+    try {
+      const username = `${Math.floor(Date.now() / 1000) + 12 * 3600}:crystal`;
+      const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(o.secret), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+      const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(username)));
+      const credential = btoa(String.fromCharCode(...sig));
+      list.push({ urls: [`turn:${o.host}:80`, `turn:${o.host}:443`, `turn:${o.host}:443?transport=tcp`, `turns:${o.host}:443?transport=tcp`], username, credential });
+    } catch (_) {}
+  }
+  return (iceCache = list);
+}
+
 function makeMqttLobby() {
   return {
     onPeers() { return () => {}; },
     presence() { return Promise.resolve(); },
     async join(name) {
-      if (!generatedHere.has(name) || NET_CONFIG.brokers.length < 2) return joinMqttTable(name, brokerFor(name));
+      if (!generatedHere.has(name) || NET_CONFIG.brokers.length < 2) return joinTable(name, brokerFor(name));
       // a new table goes to whichever broker answers first from here: usually the closest, and a dead one is skipped
       const rest = name.slice(6);
-      const tries = NET_CONFIG.brokers.map(b => { const n = "stil-" + b.id + rest; generatedHere.add(n); return joinMqttTable(n, b); });
+      const tries = NET_CONFIG.brokers.map(b => { const n = "stil-" + b.id + rest; generatedHere.add(n); return joinTable(n, b); });
       const winner = await Promise.any(tries);
       for (const t of tries) t.then(api => { if (api !== winner) api.leave(); }, () => {});
       return winner;
@@ -972,12 +1011,16 @@ function makeMqttLobby() {
   };
 }
 
-function joinMqttTable(name, broker) {
+async function joinTable(name, broker) {
   const me = tabLabel();
-  const base = `${NET_CONFIG.topicRoot}/${name}/p/`;
-  const myTopic = base + me;
+  const base = `${NET_CONFIG.topicRoot}/${name}/p/`, sigBase = `${NET_CONFIG.topicRoot}/${name}/sig/`;
+  const myTopic = base + me, mySig = sigBase + me;
+  const p2p = NET_CONFIG.p2p !== false && typeof RTCPeerConnection !== "undefined";
+  const ice = p2p ? await iceServers() : [];
   let pres = Object.freeze({}), others = new Map(), handlers = [], connHandlers = [], closed = false, cache = null;
-  let flushTimer = 0, lastSent = 0, hbTimer = 0, staleTimer = 0;
+  let flushTimer = 0, lastMqtt = 0, hbTimer = 0, staleTimer = 0, pingTimer = 0, qCount = 0;
+  const qBase = Date.now(), lastQ = new Map(), links = new Map();
+  const nextQ = () => qBase * 1000 + (++qCount);
 
   const wrap = (label, p) => Object.freeze({ peer: label, by: null, isMe: label === me, sameTab: label === me, kind: "viewer", guest: false, presence: p, updatedAt: Date.now() });
   function list() {
@@ -993,6 +1036,123 @@ function joinMqttTable(name, broker) {
   }
   function emitConn(c) { for (const h of connHandlers.slice()) { try { h(c); } catch (_) {} } }
 
+  // one presence message, from either path; the newest wins
+  function accept(label, msg) {
+    if (!msg || typeof msg.p !== "object" || !msg.p || Array.isArray(msg.p)) return;
+    if (typeof msg.q === "number") {
+      if (msg.q <= (lastQ.get(label) || 0)) return;
+      lastQ.set(label, msg.q);
+    }
+    others.set(label, { p: Object.freeze(msg.p), at: Date.now() });
+    notify();
+    ensureLink(label);
+  }
+  function drop(label) {
+    const old = others.get(label);
+    closeLink(label);
+    lastQ.delete(label);
+    if (old) { others.delete(label); notify([wrap(label, old.p)]); }
+  }
+
+  /* ---- direct links ---- */
+  function closeLink(label) {
+    const l = links.get(label);
+    if (!l) return;
+    links.delete(label);
+    try { l.pc.close(); } catch (_) {}
+  }
+  function failLink(label, l) {
+    if (links.get(label) !== l || l.state === "failed") return;
+    l.state = "failed"; l.retryAt = Date.now() + LINK_RETRY_MS;
+    try { l.pc.close(); } catch (_) {}
+  }
+  function newLink(label, id) {
+    closeLink(label);
+    const pc = new RTCPeerConnection({ iceServers: ice });
+    const l = { pc, dc: null, state: "connecting", kind: null, rtt: null, id, since: Date.now(), retryAt: 0 };
+    links.set(label, l);
+    pc.addEventListener("connectionstatechange", () => {
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") failLink(label, l);
+    });
+    setTimeout(() => { if (links.get(label) === l && l.state === "connecting") failLink(label, l); }, LINK_TIMEOUT_MS);
+    return l;
+  }
+  function gathered(pc) {
+    return new Promise(res => {
+      if (pc.iceGatheringState === "complete") return res();
+      const t = setTimeout(res, 3000);
+      pc.addEventListener("icegatheringstatechange", () => { if (pc.iceGatheringState === "complete") { clearTimeout(t); res(); } });
+    });
+  }
+  function setupChannel(label, l, dc) {
+    l.dc = dc;
+    dc.onopen = () => {
+      if (links.get(label) !== l) return;
+      l.state = "open";
+      try { dc.send(JSON.stringify({ q: nextQ(), p: pres })); } catch (_) {}
+      detectKind(l);
+      notify();
+    };
+    dc.onclose = () => { if (links.get(label) === l && l.state === "open") { failLink(label, l); l.retryAt = Date.now() + 1500; } };
+    dc.onmessage = e => {
+      let m = null;
+      try { m = JSON.parse(e.data); } catch (_) { return; }
+      if (!m) return;
+      if (m.t === "ping") { try { dc.send(JSON.stringify({ t: "pong", at: m.at })); } catch (_) {} return; }
+      if (m.t === "pong") { const rtt = performance.now() - m.at; l.rtt = l.rtt == null ? rtt : l.rtt * 0.7 + rtt * 0.3; return; }
+      accept(label, m);
+    };
+  }
+  async function detectKind(l) {
+    try {
+      const stats = await l.pc.getStats();
+      let pair = null;
+      stats.forEach(r => { if (r.type === "transport" && r.selectedCandidatePairId) pair = stats.get(r.selectedCandidatePairId); });
+      if (!pair) stats.forEach(r => { if (r.type === "candidate-pair" && r.nominated && r.state === "succeeded") pair = r; });
+      const loc = pair && stats.get(pair.localCandidateId), rem = pair && stats.get(pair.remoteCandidateId);
+      l.kind = (loc && loc.candidateType === "relay") || (rem && rem.candidateType === "relay") ? "turn" : "direct";
+    } catch (_) { l.kind = "direct"; }
+  }
+  function sendSig(to, obj) {
+    if (!client.connected) return;
+    client.publish(sigBase + to, JSON.stringify({ ...obj, from: me }), { qos: 1, retain: false });
+  }
+  // the player with the smaller id makes the offer, so the two sides never both offer at once
+  async function ensureLink(label) {
+    if (!p2p || closed || label === me) return;
+    const l = links.get(label);
+    if (l && (l.state !== "failed" || Date.now() < l.retryAt)) return;
+    if (me > label) return;
+    const id = randLabel().slice(0, 8);
+    const nl = newLink(label, id);
+    try {
+      setupChannel(label, nl, nl.pc.createDataChannel("game", { ordered: false }));
+      await nl.pc.setLocalDescription(await nl.pc.createOffer());
+      await gathered(nl.pc);
+      if (links.get(label) !== nl) return;
+      sendSig(label, { t: "offer", id, sdp: nl.pc.localDescription.sdp });
+    } catch (_) { failLink(label, nl); }
+  }
+  async function onSignal(msg) {
+    const from = msg && msg.from;
+    if (!p2p || closed || typeof from !== "string" || !/^[a-z0-9]{6,16}$/.test(from) || typeof msg.sdp !== "string") return;
+    try {
+      if (msg.t === "offer" && from < me) {
+        const l = newLink(from, msg.id);
+        l.pc.ondatachannel = e => setupChannel(from, l, e.channel);
+        await l.pc.setRemoteDescription({ type: "offer", sdp: msg.sdp });
+        await l.pc.setLocalDescription(await l.pc.createAnswer());
+        await gathered(l.pc);
+        if (links.get(from) !== l) return;
+        sendSig(from, { t: "answer", id: msg.id, sdp: l.pc.localDescription.sdp });
+      } else if (msg.t === "answer") {
+        const l = links.get(from);
+        if (l && l.id === msg.id && l.pc.signalingState === "have-local-offer") await l.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+      }
+    } catch (_) { const l = links.get(from); if (l) failLink(from, l); }
+  }
+
+  /* ---- MQTT ---- */
   const client = mqtt.connect(broker.url, {
     clientId: "ct_" + me + "_" + randLabel().slice(0, 6),
     keepalive: 15, clean: true, reconnectPeriod: 2000, connectTimeout: 15000, resubscribe: true,
@@ -1001,9 +1161,17 @@ function joinMqttTable(name, broker) {
 
   function flush() {
     flushTimer = 0;
-    if (closed || !client.connected) return;
-    lastSent = Date.now();
-    client.publish(myTopic, JSON.stringify({ p: pres }), { qos: 0, retain: true });
+    if (closed) return;
+    const body = JSON.stringify({ q: nextQ(), p: pres });
+    let allDirect = true;
+    for (const label of others.keys()) {
+      const l = links.get(label);
+      if (l && l.state === "open" && l.dc && l.dc.readyState === "open") { try { l.dc.send(body); } catch (_) { allDirect = false; } }
+      else allDirect = false;
+    }
+    // the broker gets every update only while someone cannot be reached directly; otherwise a copy every 2 s
+    const now = Date.now();
+    if (client.connected && (!allDirect || now - lastMqtt >= MQTT_BG_MS)) { lastMqtt = now; client.publish(myTopic, body, { qos: 0, retain: true }); }
   }
   function presence(patch) {
     if (closed) return Promise.reject({ code: "invalid_argument", message: "left" });
@@ -1011,41 +1179,52 @@ function joinMqttTable(name, broker) {
     for (const k in patch) { if (patch[k] === null) delete np[k]; else np[k] = patch[k]; }
     pres = Object.freeze(np);
     notify();
-    if (!flushTimer) flushTimer = setTimeout(flush, 15);
+    if (!flushTimer) flushTimer = setTimeout(flush, 8);
     return Promise.resolve();
   }
 
   client.on("message", (topic, payload) => {
-    if (closed || !topic.startsWith(base)) return;
-    const label = topic.slice(base.length);
-    if (label === me || !/^[a-z0-9]{6,16}$/.test(label)) return;
-    if (!payload || !payload.length) {
-      const old = others.get(label);
-      if (old) { others.delete(label); notify([wrap(label, old.p)]); }
+    if (closed) return;
+    let msg = null;
+    if (topic === mySig) {
+      try { msg = JSON.parse(new TextDecoder().decode(payload)); } catch (_) { return; }
+      onSignal(msg);
       return;
     }
-    let msg = null;
+    if (!topic.startsWith(base)) return;
+    const label = topic.slice(base.length);
+    if (label === me || !/^[a-z0-9]{6,16}$/.test(label)) return;
+    if (!payload || !payload.length) { drop(label); return; }
     try { msg = JSON.parse(new TextDecoder().decode(payload)); } catch (_) { return; }
-    if (!msg || typeof msg.p !== "object" || !msg.p || Array.isArray(msg.p)) return;
-    others.set(label, { p: Object.freeze(msg.p), at: Date.now() });
-    notify();
+    accept(label, msg);
   });
-  client.on("connect", () => { if (!closed) { lastSent = 0; flush(); emitConn(true); } });
+  client.on("connect", () => { if (!closed) { lastMqtt = 0; flush(); emitConn(true); } });
   client.on("close", () => { if (!closed) emitConn(false); });
   client.on("offline", () => { if (!closed) emitConn(false); });
   client.on("error", () => {});
 
-  hbTimer = setInterval(() => { if (!closed && client.connected && Date.now() - lastSent > HEARTBEAT_MS) flush(); }, 1000);
+  hbTimer = setInterval(() => { if (!closed && Date.now() - lastMqtt > MQTT_BG_MS) flush(); }, 1000);
   staleTimer = setInterval(() => {
-    const now = Date.now(), left = [];
-    for (const [l, o] of others) if (now - o.at > PEER_STALE_MS) { left.push(wrap(l, o.p)); others.delete(l); }
-    if (left.length) notify(left);
+    const now = Date.now();
+    for (const [l, o] of others) { if (now - o.at > PEER_STALE_MS) drop(l); else ensureLink(l); }
+  }, 2000);
+  pingTimer = setInterval(() => {
+    for (const l of links.values()) if (l.state === "open" && l.dc && l.dc.readyState === "open") { try { l.dc.send(JSON.stringify({ t: "ping", at: performance.now() })); } catch (_) {} }
   }, 2000);
 
   const api = {
     name,
     presence,
     peers: () => list(),
+    // how each other player is reached: "direct", "turn", "server" (broker fallback) or "connecting"
+    links() {
+      const out = {};
+      for (const label of others.keys()) {
+        const l = links.get(label);
+        out[label] = !p2p ? { kind: "server" } : !l ? { kind: "connecting" } : l.state === "open" ? { kind: l.kind || "direct", rtt: l.rtt } : l.state === "failed" ? { kind: "server" } : { kind: "connecting" };
+      }
+      return out;
+    },
     onPeers(h) {
       handlers.push(h);
       const peers = list();
@@ -1063,7 +1242,8 @@ function joinMqttTable(name, broker) {
     leave() {
       if (closed) return Promise.resolve();
       closed = true; handlers = []; connHandlers = [];
-      clearTimeout(flushTimer); clearInterval(hbTimer); clearInterval(staleTimer);
+      clearTimeout(flushTimer); clearInterval(hbTimer); clearInterval(staleTimer); clearInterval(pingTimer);
+      for (const label of [...links.keys()]) closeLink(label);
       try { if (client.connected) client.publish(myTopic, "", { qos: 0, retain: true }); } catch (_) {}
       try { client.end(false); } catch (_) {}
       return Promise.resolve();
@@ -1078,7 +1258,7 @@ function joinMqttTable(name, broker) {
     let ticks = 0;
     const t = setInterval(() => { if (++ticks >= 20) fail({ type: "timeout" }); }, 1000);
     client.once("connect", () => {
-      client.subscribe(base + "+", { qos: 0 }, err => {
+      client.subscribe({ [base + "+"]: { qos: 0 }, [mySig]: { qos: 1 } }, err => {
         if (done) return;
         if (err) { fail(err); return; }
         done = true; clearInterval(t);
@@ -1100,7 +1280,7 @@ const corr = new Map(), sentAt = new Map();
 function joinPresence() { return { n: myName, j: Date.now(), hid: document.hidden ? 1 : null, mob: isCoarse ? 1 : null }; }
 let queue = [], seq = Math.floor(Date.now() / 10) % 1e11, myPres = {};
 let peerList = [];
-const seenS = new Map();
+const seenS = new Map(), lastTBy = new Map();
 const TERMINAL = new Set(["revoked", "not_granted", "capability_disabled", "capability_removed", "transform_error"]);
 
 function setPresence(patch) {
@@ -1215,9 +1395,13 @@ function onPeersChange(ch) {
     const s = p.presence && p.presence.s;
     if (!s || seenS.get(p.peer) === s) continue;
     seenS.set(p.peer, s);
-    if (!validState(s) || !better(p.peer, s)) continue;
+    let st = s;
+    if (Array.isArray(s.T)) lastTBy.set(p.peer, s.T);
+    else if (lastTBy.has(p.peer)) st = { ...s, T: lastTBy.get(p.peer) };
+    else continue;
+    if (!validState(st) || !better(p.peer, st)) continue;
     if (isHost) stepDown(true);
-    acceptState(p.peer, s);
+    acceptState(p.peer, st);
   }
   for (const p of ch.left || []) seenS.delete(p.peer);
   if (isHost && sim) { const n = processActions(ch.peers); if (n) { const now = performance.now(); if (now - lastPublish >= 30) publish(now); } }
@@ -1265,6 +1449,7 @@ function becomeHost() {
   isHost = true;
   sim = lastState ? Sim.fromSnapshot(lastState) : new Sim();
   sim.e = (cur ? cur.e : 0) + 1;
+  pubTv = -1;
   sim.onFx = f => onSimFx(f);
   hostAcc = 0; lastHostTime = performance.now(); lastPublish = 0;
   if (cur && cur.peer !== myPeer && joined) toast("Тепер гру ведете ви");
@@ -1317,14 +1502,18 @@ function processActions(list) {
 }
 
 const enc = new TextEncoder();
+let pubTv = -1, pubN = 0;
 function publish(now) {
   lastPublish = now;
-  const s = sim.serialize();
+  const full = sim.serialize(), s = { ...full };
+  // towers rarely change: send them when they do, and every 2 s for anyone who missed it
+  pubN++;
+  if (sim.tv === pubTv && pubN % 20 !== 0) delete s.T; else pubTv = sim.tv;
   const size = () => enc.encode(JSON.stringify({ ...myPres, s })).length;
   if (size() > PRESENCE_BUDGET) { s.F = []; }
   while (size() > PRESENCE_BUDGET && s.E.length) s.E.length -= 6;
   cur = { peer: myPeer, e: s.e, t: s.t };
-  lastState = s;
+  lastState = full;
   setPresence({ s });
   handleAck(s.ak);
 }
@@ -1399,7 +1588,7 @@ async function enterTable(name) {
   if (isHost) { stopTicker(); isHost = false; sim = null; }
   const old = room; room = null;
   if (old && old !== lobby && typeof old.leave === "function") { try { await old.leave(); } catch (_) {} }
-  cur = null; lastState = null; latest = null; corr.clear(); sentAt.clear(); rttMs = null; seenS.clear(); queue = []; peerList = []; fxPending = []; myPres = {};
+  cur = null; lastState = null; latest = null; corr.clear(); sentAt.clear(); rttMs = null; seenS.clear(); lastTBy.clear(); queue = []; peerList = []; fxPending = []; myPres = {};
   selCell = -1; buildType = -1; armedCell = -1;
   let t = null;
   try { t = await lobby.join(name); } catch (_) { t = null; }
@@ -2805,6 +2994,17 @@ $("codeGo").addEventListener("click", goCode);
 $("codeIn").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); goCode(); } });
 $("inviteOverlay").addEventListener("click", e => { if (e.target === $("inviteOverlay")) $("inviteOverlay").hidden = true; });
 
+// how a seated player is reached from here, for the party list
+function linkInfo(peer) {
+  if (!peer || soloMode || peer === myPeer || !room || typeof room.links !== "function") return null;
+  const l = room.links()[peer];
+  if (!l) return null;
+  const ms = l.rtt != null ? ` ${Math.round(l.rtt / 10) * 10} мс` : "";
+  if (l.kind === "direct") return { cls: "ok", text: "пряме" + ms, title: "Пряме з’єднання між браузерами" };
+  if (l.kind === "turn") return { cls: "turn", text: "TURN" + ms, title: "Через TURN-ретранслятор" };
+  if (l.kind === "server") return { cls: "slow", text: "через сервер", title: "Пряме з’єднання не вдалося, дані йдуть через MQTT-сервер (повільно)" };
+  return { cls: "wait", text: "з’єднання…", title: "Встановлюємо пряме з’єднання" };
+}
 function nameOfPeer(peer) {
   if (peer === myPeer) return myName || "Ви";
   const p = peerList.find(x => x.peer === peer);
@@ -2940,14 +3140,14 @@ function updateUI(v, now) {
   const rows = [];
   for (let i = 0; i < MAX_SEATS; i++) {
     const peer = v ? v.seats[i] : "";
-    rows.push([i, peer, peer ? nameOfPeer(peer) : "", v ? Math.floor(v.gold[i]) : 0, v ? v.kills[i] : 0, !!(v && v.ph === 1 && v.ready[i]), !soloMode && !!cur && cur.peer === peer]);
+    rows.push([i, peer, peer ? nameOfPeer(peer) : "", v ? Math.floor(v.gold[i]) : 0, v ? v.kills[i] : 0, !!(v && v.ph === 1 && v.ready[i]), !soloMode && !!cur && cur.peer === peer, linkInfo(peer)]);
   }
   const specs = peerList.filter(p => p.kind === "viewer" && !(v && v.seats.includes(p.peer))).length;
   const pkey = JSON.stringify([rows, seat, g !== null && g >= GIFT, v && v.ph, specs, soloMode, roomReady, tableName]);
   if (pkey !== lastPartyKey) {
     lastPartyKey = pkey;
     const ul = $("party"); ul.textContent = "";
-    for (const [i, peer, nm, gold, kills, ready, host] of rows) {
+    for (const [i, peer, nm, gold, kills, ready, host, link] of rows) {
       const li = document.createElement("li");
       li.className = "hero" + (peer ? "" : " empty") + (i === seat ? " me" : "");
       if (!peer && !soloMode && roomReady && tableName) {
@@ -2973,7 +3173,13 @@ function updateUI(v, now) {
         const ks = document.createElement("i"); ks.textContent = `${kills} вбивств`;
         sm.append(gs, ks);
         plate.appendChild(sm);
-        if (host) { const tg = document.createElement("span"); tg.className = "tag"; tg.textContent = "веде гру"; plate.appendChild(tg); }
+        if (host || link) {
+          const tg = document.createElement("span"); tg.className = "tag";
+          if (link) { const lk = document.createElement("span"); lk.className = "lnk " + link.cls; lk.textContent = link.text; lk.title = link.title; tg.appendChild(lk); }
+          if (host) tg.append((link ? " · " : "") + "веде гру");
+          plate.appendChild(tg);
+        }
+        if (link) { const dot = document.createElement("span"); dot.className = "lnkdot " + link.cls; dot.title = link.title; li.appendChild(dot); }
       }
       li.append(pt, plate);
       if (ready) { const tk = document.createElement("span"); tk.className = "tick"; tk.innerHTML = ICON.tick; li.appendChild(tk); }

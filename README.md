@@ -29,8 +29,11 @@ A tower deals +15% damage for every *other* player whose tower stands on one of 
 ## How it works
 
 - The whole game is a single `index.html` file. Three.js and MQTT.js load from a CDN.
-- Players exchange game state through a public MQTT broker over a secure WebSocket (WSS). Because nothing connects browser-to-browser, it works from any network, including mobile data and strict home routers.
-- The first letter of the table code tells which broker the table uses (`e` = EMQX, `h` = HiveMQ, `m` = Mosquitto). If the first broker is down when a table is created, the next one is used automatically.
+- Players talk directly browser-to-browser over WebRTC data channels (a full mesh, at most 5 players). Typical round trips are tens of milliseconds instead of seconds through a relay.
+- To find each other, players use a public MQTT broker over a secure WebSocket (WSS). The broker carries the connection offers (signaling), keeps a copy of each player's state for whoever joins next, and acts as a slow fallback if a direct channel cannot be made.
+- NAT traversal: Google STUN servers find each player's public address. When a strict NAT (mobile data, some home routers) blocks a direct path, traffic goes through a TURN relay. By default the free shared [Open Relay](https://www.metered.ca/tools/openrelay/) TURN is used.
+- The party list shows how each player is reached: `пряме` (direct), `TURN` (relayed), or `через сервер` (broker fallback, slow), with the measured round trip.
+- The first letter of the table code tells which broker the table uses (`e` = EMQX, `h` = HiveMQ, `m` = Mosquitto). A new table goes to whichever broker answers first.
 - One player's browser (the host) runs the simulation and sends a snapshot about 10 times a second. The host keeps the job even when its tab is in the background, because the simulation ticks from a Web Worker. If the host leaves or its updates stop for 3.5 seconds, the next player takes over (visible tabs and desktops are preferred over phones) and the game continues.
 - Between snapshots every client moves enemies forward on its own (they walk fixed paths at known speeds), and small corrections are blended in, so movement stays smooth even when the network is uneven.
 - Actions such as building are applied by the host as soon as they arrive and confirmed in the next snapshot. The top-left plaque shows this round trip in milliseconds.
@@ -39,9 +42,18 @@ A tower deals +15% damage for every *other* player whose tower stands on one of 
 
 Note: public brokers are open, so anyone who knows a table code could read that table's game messages. The game sends nothing beyond player names and game state.
 
-## Using your own broker
+## Network settings
 
-At the top of the `NETWORK TRANSPORT` block in `index.html` there is a `NET_CONFIG` setting. Put your broker first in `brokers`, for example a free managed MQTT service or your own Mosquitto/EMQX with WebSockets enabled:
+At the top of the `NETWORK TRANSPORT` block in `index.html` there is a `NET_CONFIG` setting.
+
+For more reliable relaying, add your own TURN server, for example the free tier of [ExpressTURN](https://www.expressturn.com/) (1000 GB/month) or a [Metered](https://www.metered.ca/tools/openrelay/) app key, which returns the TURN servers nearest to each player:
+
+```js
+turn: [{ urls: "turn:YOUR-SERVER.expressturn.com:3478", username: "...", credential: "..." }],
+metered: { app: "your-app", apiKey: "..." },
+```
+
+To use your own MQTT broker, list it first in `brokers`:
 
 ```js
 brokers: [
