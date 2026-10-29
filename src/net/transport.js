@@ -10,13 +10,33 @@ export function randLabel() {
   try { crypto.getRandomValues(a); } catch (_) { for (let i = 0; i < a.length; i++) a[i] = (Math.random() * 256) | 0; }
   return Array.from(a, x => abc[x % abc.length]).join("");
 }
-export function tabLabel() {
-  try {
-    let v = sessionStorage.getItem("kv-peer");
-    if (!/^[a-z0-9]{10}$/.test(v || "")) { v = randLabel(); sessionStorage.setItem("kv-peer", v); }
-    return v;
-  } catch (_) { return randLabel(); }
+// Each browser keeps one player id, so a player who reloads, reopens the link or comes back after a dropped
+// connection gets their seat back. A second tab of the same browser takes a fresh id: tabs answer
+// "who has id X?" on a BroadcastChannel, and a tab whose saved id is already in use picks a new one.
+const LABEL_RE = /^[a-z0-9]{10}$/;
+let labelPromise = null;
+/** This tab's player id, stable across reloads and visits. */
+export function playerLabel() { return labelPromise || (labelPromise = claimLabel()); }
+async function claimLabel() {
+  let saved = null;
+  try { saved = localStorage.getItem("kv-pid"); } catch (_) {}
+  if (!LABEL_RE.test(saved || "")) {
+    saved = randLabel();
+    try { localStorage.setItem("kv-pid", saved); } catch (_) {}
+  }
+  if (typeof BroadcastChannel === "undefined") return saved;
+  const ch = new BroadcastChannel("crystal-tower-pid");
+  const taken = await new Promise(resolve => {
+    const t = setTimeout(() => resolve(false), 250);
+    ch.onmessage = e => { if (e.data && e.data.mine === saved) { clearTimeout(t); resolve(true); } };
+    ch.postMessage({ who: saved });
+  });
+  const label = taken ? randLabel() : saved;
+  ch.onmessage = e => { if (e.data && e.data.who === label) ch.postMessage({ mine: label }); };
+  return label;
 }
+// A fresh value per page load, so others notice when a player reloaded and reconnect at once.
+const INSTANCE = randLabel().slice(0, 6);
 function brokerFor(name) {
   const letter = name.slice(5, 6);
   return NET_CONFIG.brokers.find(b => b.id === letter) || NET_CONFIG.brokers[0];
@@ -65,12 +85,15 @@ export function makeLobby() {
 }
 
 async function joinTable(name, broker) {
-  const me = tabLabel();
+  const me = await playerLabel();
   const base = `${NET_CONFIG.topicRoot}/${name}/p/`, sigBase = `${NET_CONFIG.topicRoot}/${name}/sig/`;
   const myTopic = base + me, mySig = sigBase + me;
   const p2p = NET_CONFIG.p2p !== false && typeof RTCPeerConnection !== "undefined";
   const ice = p2p ? await iceServers() : [];
   let pres = Object.freeze({}), others = new Map(), handlers = [], connHandlers = [], closed = false, cache = null;
+  let linkLostHandlers = [];
+  const instOf = new Map(); // label -> page-load instance last seen
+  const lastDirect = new Map(); // label -> when we last heard from them over a direct channel
   let flushTimer = 0, lastMqtt = 0, hbTimer = 0, staleTimer = 0, pingTimer = 0, qCount = 0;
   const qBase = Date.now(), lastQ = new Map(), links = new Map();
   const nextQ = () => qBase * 1000 + (++qCount);
@@ -92,6 +115,11 @@ async function joinTable(name, broker) {
   // one presence message, from either path; the newest wins
   function accept(label, msg) {
     if (!msg || typeof msg.p !== "object" || !msg.p || Array.isArray(msg.p)) return;
+    if (typeof msg.k === "string" && instOf.get(label) !== msg.k) {
+      // the player reloaded or came back: forget the old connection and counters, connect again now
+      if (instOf.has(label)) { closeLink(label); lastQ.delete(label); }
+      instOf.set(label, msg.k);
+    }
     if (typeof msg.q === "number") {
       if (msg.q <= (lastQ.get(label) || 0)) return;
       lastQ.set(label, msg.q);
@@ -142,12 +170,17 @@ async function joinTable(name, broker) {
     dc.onopen = () => {
       if (links.get(label) !== l) return;
       l.state = "open";
-      try { dc.send(JSON.stringify({ q: nextQ(), p: pres })); } catch (_) {}
+      try { dc.send(JSON.stringify({ q: nextQ(), k: INSTANCE, p: pres })); } catch (_) {}
       detectKind(l);
       notify();
     };
-    dc.onclose = () => { if (links.get(label) === l && l.state === "open") { failLink(label, l); l.retryAt = Date.now() + 1500; } };
+    dc.onclose = () => {
+      if (links.get(label) !== l || l.state !== "open") return;
+      failLink(label, l); l.retryAt = Date.now() + 1500;
+      for (const h of linkLostHandlers.slice()) { try { h(label); } catch (_) {} }
+    };
     dc.onmessage = e => {
+      lastDirect.set(label, Date.now());
       let m = null;
       try { m = JSON.parse(e.data); } catch (_) { return; }
       if (!m) return;
@@ -215,7 +248,7 @@ async function joinTable(name, broker) {
   function flush() {
     flushTimer = 0;
     if (closed) return;
-    const body = JSON.stringify({ q: nextQ(), p: pres });
+    const body = JSON.stringify({ q: nextQ(), k: INSTANCE, p: pres });
     let allDirect = true;
     for (const label of others.keys()) {
       const l = links.get(label);
@@ -247,7 +280,12 @@ async function joinTable(name, broker) {
     if (!topic.startsWith(base)) return;
     const label = topic.slice(base.length);
     if (label === me || !/^[a-z0-9]{6,16}$/.test(label)) return;
-    if (!payload || !payload.length) { drop(label); return; }
+    if (!payload || !payload.length) {
+      // an empty retained message means the player left; ignore a stale one if a live direct channel says otherwise
+      const l = links.get(label);
+      if (l && l.state === "open" && l.dc && l.dc.readyState === "open" && Date.now() - (lastDirect.get(label) || 0) < 3000) return;
+      drop(label); return;
+    }
     try { msg = JSON.parse(new TextDecoder().decode(payload)); } catch (_) { return; }
     accept(label, msg);
   });
@@ -270,6 +308,8 @@ async function joinTable(name, broker) {
     presence,
     peers: () => list(),
     // how each other player is reached: "direct", "turn", "server" (broker fallback) or "connecting"
+    /** Called with a player's id when the direct channel to them closes (tab closed, network lost). */
+    onLinkLost(h) { linkLostHandlers.push(h); return () => { linkLostHandlers = linkLostHandlers.filter(x => x !== h); }; },
     links() {
       const out = {};
       for (const label of others.keys()) {
@@ -294,7 +334,7 @@ async function joinTable(name, broker) {
     on: () => () => {},
     leave() {
       if (closed) return Promise.resolve();
-      closed = true; handlers = []; connHandlers = [];
+      closed = true; handlers = []; connHandlers = []; linkLostHandlers = [];
       clearTimeout(flushTimer); clearInterval(hbTimer); clearInterval(staleTimer); clearInterval(pingTimer);
       for (const label of [...links.keys()]) closeLink(label);
       try { if (client.connected) client.publish(myTopic, "", { qos: 0, retain: true }); } catch (_) {}

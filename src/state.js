@@ -13,6 +13,7 @@ export const S = {
   switching: false, // moving between tables
   invitedByHash: false, // opened from an invite link or a code
   netFailed: null, // table name we could not reach
+  versionBlock: null, // { newer, name }: this table runs another build, we cannot sit down
 
   // who we are
   myPeer: null, // transport label of this tab
@@ -36,6 +37,7 @@ export const S = {
   armedCell: -1, // touch: first tap arms a cell, second tap builds
   buildType: -1, // selected tower card
   selCell: -1, // selected tower on the board
+  upgradePreview: false, // pointer is on "Upgrade": show the next level's range
 
   mySeat: -1, // our seat in the current view, for effects
   uiDirty: true, // HUD needs a refresh

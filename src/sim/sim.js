@@ -1,6 +1,6 @@
 // Authoritative game simulation. Only the host runs it; everyone else shows the state it publishes.
 import {
-  BLOCKED, BREAK_TIME, COLS, ENEMIES, GIFT, MAX_ENEMIES, MAX_SEATS, MAX_TOWERS, MAX_WAVES, PATHS, ROWS, SEAT_GRACE, SLOW_FACTOR, START_GOLD, START_LIVES, SYN_BONUS, TOWERS, enemyTypeAt, hpScale, posAt, sellValue, spawnInterval, synergyAt, towerStats, upgradeCost, waveTotal,
+  BLOCKED, BREAK_TIME, COLS, ENEMIES, GIFT, MAX_ENEMIES, MAX_SEATS, MAX_TOWERS, MAX_WAVES, PATHS, ROWS, SEAT_GRACE, NO_OWNER, SLOW_FACTOR, START_GOLD, START_LIVES, SYN_BONUS, TOWERS, enemyTypeAt, hpScale, posAt, sellValue, spawnInterval, synergyAt, towerStats, upgradeCost, waveTotal,
 } from "./rules.js";
 
 export class Sim {
@@ -19,13 +19,18 @@ export class Sim {
     this.towers = new Map(); this.enemies = []; this.nid = 1; this.syn = new Map(); this.tv = (this.tv || 0) + 1;
   }
   occupied() { const r = []; for (let i = 0; i < MAX_SEATS; i++) if (this.seats[i]) r.push(i); return r; }
+  /**
+   * Seats players who are at the table, in joining order. Someone who drops out keeps their seat
+   * (with gold, towers and acknowledged actions) for SEAT_GRACE ticks and gets it back on return.
+   * After that the seat is freed: their towers stay on the board without an owner and the next
+   * player in that seat starts fresh.
+   */
   assignSeats(joinedSorted) {
     const present = new Set(joinedSorted);
-    // a player who drops out keeps the seat (and their acked actions) for SEAT_GRACE ticks, so short reconnects change nothing
     for (const p of [...this.gone.keys()]) if (present.has(p)) this.gone.delete(p);
     for (const p of [...this.seats.filter(Boolean), ...this.ak.keys()]) if (!present.has(p) && !this.gone.has(p)) this.gone.set(p, this.t);
     const expired = p => this.gone.has(p) && this.t - this.gone.get(p) > SEAT_GRACE;
-    for (let i = 0; i < MAX_SEATS; i++) if (this.seats[i] && expired(this.seats[i])) { this.seats[i] = ""; this.ready[i] = false; }
+    for (let i = 0; i < MAX_SEATS; i++) if (this.seats[i] && expired(this.seats[i])) this.freeSeat(i);
     for (const peer of joinedSorted) {
       if (this.seats.includes(peer)) continue;
       const free = this.seats.indexOf("");
@@ -33,12 +38,22 @@ export class Sim {
       this.seats[free] = peer; this.ready[free] = false;
       if (!(this.u & (1 << free))) {
         this.u |= 1 << free;
-        if (this.w > 0) this.gold[free] = Math.max(this.gold[free], Math.round(this.bk * 0.6));
+        this.gold[free] = this.w > 0 ? Math.max(START_GOLD, Math.round(this.bk * 0.6)) : START_GOLD;
+        this.kills[free] = 0;
       }
     }
     for (const k of [...this.ak.keys()]) if (expired(k)) this.ak.delete(k);
     for (const k of [...this.gone.keys()]) if (expired(k)) this.gone.delete(k);
   }
+  freeSeat(i) {
+    this.seats[i] = ""; this.ready[i] = false;
+    this.u &= ~(1 << i);
+    let changed = false;
+    for (const tw of this.towers.values()) if (tw.o === i) { tw.o = NO_OWNER; changed = true; }
+    if (changed) { this.recomputeSyn(); this.tv++; }
+  }
+  /** Seats whose player is at the table right now (not away). */
+  present() { return this.occupied().filter(i => !this.gone.has(this.seats[i])); }
   recomputeSyn() {
     this.syn = new Map();
     for (const tw of this.towers.values()) this.syn.set(tw.c, synergyAt(this.towers, tw));
@@ -79,7 +94,7 @@ export class Sim {
   step(dt) {
     this.t++;
     if (this.ph === 1) {
-      const occ = this.occupied();
+      const occ = this.present();
       if (occ.length && occ.every(i => this.ready[i])) this.startWave();
       else if (this.tm > 0) { this.tm -= dt; if (this.tm <= 0) this.startWave(); }
     } else if (this.ph === 2) this.waveTick(dt);
@@ -223,7 +238,7 @@ export class Sim {
     }
     if (Array.isArray(s.T)) for (let i = 0; i + 3 < s.T.length; i += 4) {
       const c = s.T[i], ty = s.T[i + 1], lv = s.T[i + 2], o = s.T[i + 3];
-      if (!Number.isInteger(c) || c < 0 || c >= COLS * ROWS || BLOCKED[c] || !TOWERS[ty] || !(lv >= 1 && lv <= 3) || !(o >= 0 && o < MAX_SEATS)) continue;
+      if (!Number.isInteger(c) || c < 0 || c >= COLS * ROWS || BLOCKED[c] || !TOWERS[ty] || !(lv >= 1 && lv <= 3) || !(o === NO_OWNER || (o >= 0 && o < MAX_SEATS))) continue;
       m.towers.set(c, { c, ty, lv, o, cd: 0 });
     }
     if (Array.isArray(s.E)) for (let i = 0; i + 5 < s.E.length; i += 6) {

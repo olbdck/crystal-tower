@@ -125,6 +125,9 @@ export function initInput() {
   glCanvas.addEventListener("click", onBoardClick);
 
   $("upBtn").addEventListener("click", doUpgrade);
+  // while the pointer or focus is on "Upgrade", the board shows the next level's range
+  const preview = on => () => { S.upgradePreview = on; };
+  for (const [ev, on] of [["pointerenter", true], ["pointerleave", false], ["focus", true], ["blur", false]]) $("upBtn").addEventListener(ev, preview(on));
   $("sellBtn").addEventListener("click", doSell);
   $("readyBtn").addEventListener("click", doReady);
   $("newGameBtn").addEventListener("click", () => act("n"));

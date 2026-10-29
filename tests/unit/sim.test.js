@@ -78,3 +78,30 @@ test("waves grow with the number of players", () => {
   assert.ok(waveTotal(10, 5) > waveTotal(10, 1));
   assert.equal(waveMix(5, 1)[3], 1, "every fifth wave brings a Colossus");
 });
+
+test("a dropped player keeps the seat for a while, then towers stay without an owner", async () => {
+  const { SEAT_GRACE, NO_OWNER } = await import("../../src/sim/rules.js");
+  const sim = table(2), cell = FREE[0];
+  act(sim, 1, "b", cell, 0);
+  const gold = sim.gold[1];
+  for (let i = 0; i < 100; i++) { sim.t++; sim.assignSeats(["p0"]); }
+  assert.deepEqual(sim.seats.slice(0, 2), ["p0", "p1"], "seat held while away");
+  sim.assignSeats(["p0", "p1"]);
+  assert.equal(sim.gold[1], gold, "comes back to the same gold");
+  for (let i = 0; i < SEAT_GRACE + 5; i++) { sim.t++; sim.assignSeats(["p0"]); }
+  assert.equal(sim.seats[1], "", "seat freed after the grace period");
+  assert.equal(sim.towers.get(cell).o, NO_OWNER);
+  sim.assignSeats(["p0", "p9"]);
+  assert.equal(sim.seats[1], "p9");
+  assert.equal(sim.gold[1], START_GOLD, "newcomer starts fresh");
+  act(sim, 1, "s", cell);
+  assert.equal(sim.towers.has(cell), true, "nobody can sell an ownerless tower");
+});
+
+test("players who are away do not hold back the first wave", () => {
+  const sim = table(2);
+  sim.t++; sim.assignSeats(["p0"]);
+  act(sim, 0, "r", 1);
+  sim.step(STEP);
+  assert.equal(sim.w, 1);
+});

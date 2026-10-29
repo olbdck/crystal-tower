@@ -201,7 +201,7 @@ export function updateCrystal(v, now) {
 
 export function updateCursor(v, now) {
   const d = decor;
-  d.hoverTile.visible = d.rangeDisk.visible = d.rangeRing.visible = d.selRing.visible = false;
+  d.hoverTile.visible = d.rangeDisk.visible = d.rangeRing.visible = d.selRing.visible = d.nextRing.visible = false;
   d.ghosts.forEach(g => { g.visible = false; });
   d.mates.forEach(m => { m.visible = false; });
   d.partnerRings.forEach(m => { m.visible = false; });
@@ -239,6 +239,12 @@ export function updateCursor(v, now) {
     showRange(S.selCell, towerStats(st.ty, st.lv).range, SEAT_HEX[st.o] || 0xf1cd6a);
     d.selRing.visible = true; d.selRing.position.set(S.selCell % COLS + 0.5, 0.03, ((S.selCell / COLS) | 0) + 0.5);
     d.selRing.rotation.z = now * 0.001;
+    if (S.upgradePreview && st.lv < 3) {
+      d.nextRing.visible = true;
+      d.nextRing.position.set(S.selCell % COLS + 0.5, 0.024, ((S.selCell / COLS) | 0) + 0.5);
+      d.nextRing.scale.setScalar(towerStats(st.ty, st.lv + 1).range);
+      d.nextRing.material.opacity = 0.65 + Math.sin(now * 0.01) * 0.25;
+    }
     if (!synKeyNow) {
       const r = otherOwners(v.tmap, S.selCell, st.o);
       synHint = { kind: "sel", cell: S.selCell, count: Math.min(4, r.owners.size), partners: r.partners };

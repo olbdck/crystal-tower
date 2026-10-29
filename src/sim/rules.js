@@ -2,7 +2,11 @@
 // Pure data and functions, no DOM, so it runs in the browser and in Node tests alike.
 export const COLS = 20, ROWS = 12, MAX_SEATS = 5, MAX_WAVES = 20;
 export const START_GOLD = 160, START_LIVES = 20, BREAK_TIME = 20, GIFT = 25;
-export const MAX_TOWERS = 85, MAX_ENEMIES = 55, STEP = 1 / 30, SYN_BONUS = 0.15, SLOW_FACTOR = 0.5, SEAT_GRACE = 300;
+export const MAX_TOWERS = 85, MAX_ENEMIES = 55, STEP = 1 / 30, SYN_BONUS = 0.15, SLOW_FACTOR = 0.5;
+// A player who drops out keeps their seat, gold and towers this long (in ticks): 3 minutes.
+export const SEAT_GRACE = 30 * 180;
+/** Owner of towers left behind by a player who did not come back: they keep shooting, nobody owns them. */
+export const NO_OWNER = -1;
 
 export const LANE_WP = [
   [[-1, 1], [3, 1], [3, 4], [7, 4], [7, 6]],

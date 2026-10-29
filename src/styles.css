@@ -43,7 +43,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 }
 
 /* ---------- top bar ---------- */
-.topbar { grid-area: top; display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 12px; pointer-events: none; padding-bottom: 18px; }
+.topbar { grid-area: top; display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 12px; pointer-events: none; padding-bottom: 24px; }
 .topleft { justify-self: start; display: flex; gap: 8px; align-items: flex-start; pointer-events: auto; }
 .plaque {
   background: linear-gradient(180deg, var(--wood-2), var(--wood-1));
@@ -131,6 +131,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
   background: linear-gradient(var(--gold-2), var(--gold-1)); box-shadow: 0 0 0 1.5px var(--wood-0), 0 3px 6px rgba(0, 0, 0, .5);
 }
 .hero .gift:disabled { filter: grayscale(.8) brightness(.7); cursor: default; }
+.hero.away .portrait { filter: grayscale(.85) brightness(.6); }
+.hero.away .plate { opacity: .7; }
 .hero.empty .portrait { background: radial-gradient(circle at 36% 30%, #4a3020, var(--wood-0)); box-shadow: 0 0 0 3px var(--wood-3), 0 0 0 5px var(--wood-0); color: var(--wood-3); font-size: 20px; opacity: .8; }
 .hero.empty .plate { opacity: .65; }
 .hero.empty .plate b { color: var(--parch-0); font-family: var(--font-body); font-style: italic; font-size: 14px; }
@@ -182,6 +184,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 .selinfo dt { color: var(--ink-soft); }
 .selinfo dd { margin: 0; text-align: right; font-family: var(--font-label); font-variant-numeric: tabular-nums; }
 .selinfo dd.syn { color: #6a3fc0; font-weight: 700; }
+.selinfo .next { margin-left: 6px; color: #2f7a1f; font-weight: 700; white-space: nowrap; }
+.selinfo .next::before { content: ""; }
 .right:has(#selCard:not([hidden])) .nextwave { display: none; }
 .right:has(#selCard:not([hidden])) .ready { width: 100px; height: 100px; }
 .right:has(#selCard:not([hidden])) .ready .lbl { font-size: 17px; }

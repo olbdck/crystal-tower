@@ -14,6 +14,7 @@ import { refreshCardArt } from "./input.js";
 import { updateJoinCard, copyInvite } from "./join.js";
 import { openSyn } from "./modals.js";
 
+const AWAY = { cls: "slow", text: "немає зв’язку", title: "Гравець вийшов або втратив зв’язок. Його місце, золото й вежі чекають 3 хвилини" };
 // how a seated player is reached from here, for the party list
 function linkInfo(peer) {
   if (!peer || S.soloMode || peer === S.myPeer || !S.room || typeof S.room.links !== "function") return null;
@@ -113,18 +114,30 @@ export function updateUI(v, now) {
       const stars = $("selStars"); stars.textContent = "";
       for (let i = 0; i < 3; i++) { const sp = document.createElement("span"); sp.textContent = "★"; if (i >= tw.lv) sp.className = "off"; stars.appendChild(sp); }
       const owner = $("selOwner"); owner.textContent = "";
-      const sw = document.createElement("span"); sw.className = "sw"; sw.style.setProperty("--c", SEAT_CSS[tw.o]);
-      const on = document.createElement("span"); on.textContent = v.seats[tw.o] ? nameOfPeer(v.seats[tw.o]) + (tw.o === seat ? " (ви)" : "") : "вільне місце";
+      const sw = document.createElement("span"); sw.className = "sw"; sw.style.setProperty("--c", SEAT_CSS[tw.o] || "#9b8a70");
+      const on = document.createElement("span"); on.textContent = tw.o < 0 ? "нічия вежа" : v.seats[tw.o] ? nameOfPeer(v.seats[tw.o]) + (tw.o === seat ? " (ви)" : "") : "вільне місце";
       owner.append(sw, on);
-      const rows = [["Шкода", (s.dmg * (1 + SYN_BONUS * syn)).toFixed(1)], ["Постріл", `${s.rate.toFixed(2)} с`], ["Дальність", s.range.toFixed(1)]];
-      if (tw.ty === 1) rows.push(["Вибух", String(s.splash)]);
-      if (tw.ty === 2) rows.push(["Холод", `${s.slowDur.toFixed(1)} с`]);
-      if (tw.ty === 3) rows.push(["Перескоки", String(s.chain)]);
-      rows.push(["Синергія", syn ? `+${Math.round(syn * SYN_BONUS * 100)}%` : "—"]);
+      // current stats, and what the next level would give (upgrade preview)
+      const nx = tw.lv < 3 ? towerStats(tw.ty, tw.lv + 1) : null, synK = 1 + SYN_BONUS * syn;
+      const rows = [
+        ["Шкода", (s.dmg * synK).toFixed(1), nx && (nx.dmg * synK).toFixed(1)],
+        ["Постріл", `${s.rate.toFixed(2)} с`, nx && `${nx.rate.toFixed(2)} с`],
+        ["Дальність", s.range.toFixed(1), nx && nx.range.toFixed(1)],
+      ];
+      if (tw.ty === 1) rows.push(["Вибух", String(s.splash), null]);
+      if (tw.ty === 2) rows.push(["Холод", `${s.slowDur.toFixed(1)} с`, nx && `${nx.slowDur.toFixed(1)} с`]);
+      if (tw.ty === 3) rows.push(["Перескоки", String(s.chain), nx && String(nx.chain)]);
+      rows.push(["Синергія", syn ? `+${Math.round(syn * SYN_BONUS * 100)}%` : "—", null]);
       const dl = $("selInfo"); dl.textContent = "";
-      for (const [k, val] of rows) {
+      dl.classList.toggle("has-next", !!nx);
+      for (const [k, val, next] of rows) {
         const dt = document.createElement("dt"); dt.textContent = k;
         const dd = document.createElement("dd"); dd.textContent = val; if (k === "Синергія" && syn) dd.className = "syn";
+        if (next && next !== val) {
+          const n = document.createElement("span"); n.className = "next"; n.textContent = `→ ${next}`;
+          n.title = `Після покращення до рівня ${tw.lv + 1}`;
+          dd.appendChild(n);
+        }
         dl.append(dt, dd);
       }
       const up = $("upBtn"), sell = $("sellBtn");
@@ -139,8 +152,8 @@ export function updateUI(v, now) {
         sl.append("Підсилюють:");
         for (const o of rel.owners) {
           const w = document.createElement("span"); w.className = "who";
-          const dot = document.createElement("i"); dot.style.setProperty("--c", SEAT_CSS[o]);
-          w.append(dot, v.seats[o] ? nameOfPeer(v.seats[o]) : "вільне місце");
+          const dot = document.createElement("i"); dot.style.setProperty("--c", SEAT_CSS[o] || "#9b8a70");
+          w.append(dot, o < 0 ? "нічиї вежі" : v.seats[o] ? nameOfPeer(v.seats[o]) : "вільне місце");
           sl.appendChild(w);
         }
       } else sl.append(v.seats.filter(Boolean).length > 1 ? "Поставте поруч вежу іншого гравця: +15% за кожного." : "Синергія з’явиться, коли поруч стоятимуть вежі інших гравців.");
@@ -154,16 +167,17 @@ export function updateUI(v, now) {
   const rows = [];
   for (let i = 0; i < MAX_SEATS; i++) {
     const peer = v ? v.seats[i] : "";
-    rows.push([i, peer, peer ? nameOfPeer(peer) : "", v ? Math.floor(v.gold[i]) : 0, v ? v.kills[i] : 0, !!(v && v.ph === 1 && v.ready[i]), !S.soloMode && !!S.cur && S.cur.peer === peer, linkInfo(peer)]);
+    const away = !!peer && !S.soloMode && peer !== S.myPeer && !S.peerList.some(p => p.peer === peer);
+    rows.push([i, peer, peer ? nameOfPeer(peer) : "", v ? Math.floor(v.gold[i]) : 0, v ? v.kills[i] : 0, !!(v && v.ph === 1 && v.ready[i]), !S.soloMode && !!S.cur && S.cur.peer === peer, away ? AWAY : linkInfo(peer), away]);
   }
   const specs = S.peerList.filter(p => p.kind === "viewer" && !(v && v.seats.includes(p.peer))).length;
   const pkey = JSON.stringify([rows, seat, g !== null && g >= GIFT, v && v.ph, specs, S.soloMode, S.roomReady, S.tableName]);
   if (pkey !== lastPartyKey) {
     lastPartyKey = pkey;
     const ul = $("party"); ul.textContent = "";
-    for (const [i, peer, nm, gold, kills, ready, host, link] of rows) {
+    for (const [i, peer, nm, gold, kills, ready, host, link, away] of rows) {
       const li = document.createElement("li");
-      li.className = "hero" + (peer ? "" : " empty") + (i === seat ? " me" : "");
+      li.className = "hero" + (peer ? "" : " empty") + (i === seat ? " me" : "") + (away ? " away" : "");
       if (!peer && !S.soloMode && S.roomReady && S.tableName) {
         const inv = document.createElement("button");
         inv.type = "button"; inv.className = "inv";

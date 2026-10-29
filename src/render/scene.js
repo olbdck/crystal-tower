@@ -105,10 +105,11 @@ function buildWorld() {
   decor.hoverTile = part(cursorRoot, new THREE.PlaneGeometry(0.94, 0.94), basic(0xffffff, { op: 0.35 }), 0, 0.012, 0, { rx: -Math.PI / 2, noShadow: true });
   decor.rangeDisk = part(cursorRoot, new THREE.CircleGeometry(1, 64), basic(0xffffff, { op: 0.12 }), 0, 0.02, 0, { rx: -Math.PI / 2, noShadow: true });
   decor.rangeRing = part(cursorRoot, new THREE.RingGeometry(0.965, 1, 96), basic(0xffffff, { op: 0.75 }), 0, 0.022, 0, { rx: -Math.PI / 2, noShadow: true });
+  decor.nextRing = part(cursorRoot, new THREE.RingGeometry(0.955, 1, 96), basic(0x8dff6a, { op: 0.9 }), 0, 0.024, 0, { rx: -Math.PI / 2, noShadow: true });
   decor.selRing = part(cursorRoot, new THREE.RingGeometry(0.44, 0.52, 40), basic(0xf1cd6a, { op: 0.95 }), 0, 0.03, 0, { rx: -Math.PI / 2, noShadow: true });
   decor.ghosts = TOWERS.map((_, i) => { const gm = towerModel(i, 1, MAT.ghost, MAT.ghost); gm.visible = false; cursorRoot.add(gm); return gm; });
   decor.mates = [0, 1, 2, 3, 4].map(i => part(cursorRoot, new THREE.PlaneGeometry(0.94, 0.94), basic(SEAT_HEX[i], { op: 0.38 }), 0, 0.014, 0, { rx: -Math.PI / 2, noShadow: true }));
-  for (const o of [decor.hoverTile, decor.rangeDisk, decor.rangeRing, decor.selRing, ...decor.mates]) o.visible = false;
+  for (const o of [decor.hoverTile, decor.rangeDisk, decor.rangeRing, decor.nextRing, decor.selRing, ...decor.mates]) o.visible = false;
   decor.pending = new Map();
   decor.synPrev = new THREE.Group(); decor.synPrevKey = ""; cursorRoot.add(decor.synPrev);
   decor.partnerRings = Array.from({ length: 8 }, () => {

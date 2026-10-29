@@ -6,19 +6,21 @@
 // player takes over from the last snapshot.
 import { Sim } from "../sim/sim.js";
 import { STEP, TOWERS, ENEMIES, PATHS, synergyAt } from "../sim/rules.js";
-import { NET_CONFIG } from "../config.js";
+import { NET_CONFIG, BUILD } from "../config.js";
 import { makeLobby, generatedHere } from "./transport.js";
 import { predictEnemies, corr, corrOffset } from "./view.js";
 import { S } from "../state.js";
 import { toast } from "../ui/dom.js";
-import { updateJoinCard, showJoin } from "../ui/join.js";
+import { updateJoinCard, showJoin, tryRejoin } from "../ui/join.js";
 
 export const STEP_MS = STEP * 1000;
-const PRESENCE_BUDGET = 3800, PUBLISH_MS = 100, HOST_STALE_MS = 3500;
+const PRESENCE_BUDGET = 3800, PUBLISH_MS = 100;
+// Take over when the host's state stops for this long; much sooner once its direct channel closed.
+const HOST_STALE_MS = 3500, HOST_STALE_DIRECT_MS = 2000, HOST_GONE_MS = 1200;
 const TERMINAL = new Set(["revoked", "not_granted", "capability_disabled", "capability_removed", "transform_error"]);
 const isCoarse = (() => { try { return matchMedia("(pointer: coarse)").matches; } catch (_) { return false; } })();
 
-let hostTimer = null, tickWorker = null, hostAcc = 0, lastHostTime = 0, lastPublish = 0;
+let hostTimer = null, tickWorker = null, hostAcc = 0, lastHostTime = 0, lastPublish = 0, hostLinkLostAt = -1e9;
 let seq = Math.floor(Date.now() / 10) % 1e11;
 const sentAt = new Map(), seenS = new Map(), lastTBy = new Map();
 export const fxPending = []; // effects from snapshots, played when the view reaches their tick
@@ -28,7 +30,9 @@ export const lobbyTables = new Map();
 export function hostAlpha() { return Math.min(1, hostAcc / STEP_MS); }
 
 /* ---------- presence ---------- */
-export function joinPresence() { return { n: S.myName, j: Date.now(), hid: document.hidden ? 1 : null, mob: isCoarse ? 1 : null }; }
+export function joinPresence() {
+  return { n: S.myName, j: Date.now(), hid: document.hidden ? 1 : null, mob: isCoarse ? 1 : null, v: BUILD.id, vt: BUILD.t };
+}
 
 export function setPresence(patch) {
   for (const k in patch) { if (patch[k] === null) delete S.myPres[k]; else S.myPres[k] = patch[k]; }
@@ -56,19 +60,46 @@ function makeSoloRoom() {
 }
 
 export const byJ = (a, b) => (a.presence.j - b.presence.j) || (a.peer < b.peer ? -1 : a.peer > b.peer ? 1 : 0);
-/** Players who sat down at the table, in joining order. */
-export function joinedPeers(list) {
-  return list.filter(p => p.kind === "viewer" && p.presence && typeof p.presence.j === "number" && Number.isFinite(p.presence.j)).sort(byJ);
+const sat = p => p.kind === "viewer" && p.presence && typeof p.presence.j === "number" && Number.isFinite(p.presence.j);
+/** Same build as ours. Players on another build never get a seat or the host role here. */
+export const sameBuild = p => p.sameTab || (p.presence && p.presence.v === BUILD.id);
+/** Players who sat down at the table on our build, in joining order. */
+export function joinedPeers(list) { return list.filter(p => sat(p) && sameBuild(p)).sort(byJ); }
+
+/* ---------- version check ---------- */
+// The table runs the build of its host, or of whoever sat down first when nobody hosts yet.
+// A player on another build cannot sit down and is told whose page needs a refresh.
+function updateVersionCheck() {
+  let block = null;
+  const others = S.peerList.filter(p => !p.sameTab && sat(p));
+  if (!S.isHost) {
+    const host = S.cur && others.find(p => p.peer === S.cur.peer);
+    const ref = host || (S.joined ? null : others.slice().sort(byJ)[0]);
+    if (ref && !sameBuild(ref) && !others.some(p => sameBuild(p) && p.presence.s)) {
+      block = { newer: (BUILD.t || 0) > (ref.presence.vt || 0), name: cleanName(ref.presence.n) || "Гравець" };
+    }
+  }
+  if (JSON.stringify(block) !== JSON.stringify(S.versionBlock)) { S.versionBlock = block; updateJoinCard(); S.uiDirty = true; }
+  // tell the players who sit here that someone on another build is waiting
+  for (const p of S.peerList) if (!p.sameTab && p.presence && p.presence.v && !sameBuild(p) && !warnedBuild.has(p.peer) && S.joined) {
+    warnedBuild.add(p.peer);
+    const nm = cleanName(p.presence.n) || "Гравець";
+    toast((p.presence.vt || 0) > (BUILD.t || 0)
+      ? `${nm} має новішу версію гри й не може сісти. Оновіть сторінку між партіями`
+      : `${nm} має стару версію гри: попросіть оновити сторінку`);
+  }
 }
+const warnedBuild = new Set();
 
 export function cleanName(n) {
   if (typeof n !== "string") return "";
   return n.replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁯﻿]/g, "").trim().slice(0, 16);
 }
+const knownNames = new Map(); // remembers names of players who dropped out, for the party list
 export function nameOfPeer(peer) {
   if (peer === S.myPeer) return S.myName || "Ви";
   const p = S.peerList.find(x => x.peer === peer);
-  return (p && cleanName(p.presence && p.presence.n)) || "Гравець";
+  return (p && cleanName(p.presence && p.presence.n)) || knownNames.get(peer) || "Гравець";
 }
 
 /* ---------- snapshots ---------- */
@@ -148,9 +179,13 @@ function handleAck(ak) {
 
 function onPeersChange(ch) {
   S.peerList = ch.peers;
-  for (const p of ch.peers) if (p.sameTab) S.myPeer = p.peer;
   for (const p of ch.peers) {
-    if (p.sameTab || p.kind !== "viewer") continue;
+    if (p.sameTab) S.myPeer = p.peer;
+    const nm = p.presence && cleanName(p.presence.n);
+    if (nm) knownNames.set(p.peer, nm);
+  }
+  for (const p of ch.peers) {
+    if (p.sameTab || p.kind !== "viewer" || !sameBuild(p)) continue;
     const s = p.presence && p.presence.s;
     if (!s || seenS.get(p.peer) === s) continue;
     seenS.set(p.peer, s);
@@ -163,6 +198,7 @@ function onPeersChange(ch) {
     acceptState(p.peer, st);
   }
   for (const p of ch.left || []) seenS.delete(p.peer);
+  updateVersionCheck();
   if (S.isHost && S.sim) { const n = processActions(ch.peers); if (n) { const now = performance.now(); if (now - lastPublish >= 30) publish(now); } }
   decideHost();
   S.uiDirty = true;
@@ -185,12 +221,19 @@ export function decideHost() {
   const now = performance.now();
   const live = joinedPeers(S.peerList);
   const hostPeer = S.cur ? live.find(p => p.peer === S.cur.peer && p.presence.s) : null;
-  if (hostPeer && now - S.lastStateAt < HOST_STALE_MS) return;
-  // the host looks silent: make sure it is not our own connection that dropped
-  if (hostPeer && (!S.connected || !S.connectedSince || now - S.connectedSince < 5000)) return;
+  // over a direct channel the host's state arrives steadily, so silence means trouble sooner;
+  // a closed channel to the host (tab closed, connection lost) means trouble right away
+  const linkGone = now - hostLinkLostAt < 8000;
+  const direct = hostPeer && S.room.links && /^(direct|turn)$/.test((S.room.links()[hostPeer.peer] || {}).kind || "");
+  const staleAfter = linkGone ? HOST_GONE_MS : direct ? HOST_STALE_DIRECT_MS : HOST_STALE_MS;
+  if (hostPeer && now - S.lastStateAt < staleAfter) return;
+  // the host looks silent through the broker: make sure it is not our own broker connection that dropped
+  if (hostPeer && !linkGone && !direct && (!S.connected || !S.connectedSince || now - S.connectedSince < 5000)) return;
   const pool = live.filter(p => p !== hostPeer).sort((a, b) => hostRank(a) - hostRank(b) || byJ(a, b));
   if (pool.length && pool[0].peer === S.myPeer) becomeHost();
 }
+/** Internals for tests and debugging. */
+export function hostDebug() { return { hostLinkLostAt, hostSince, lastStateAt: S.lastStateAt, now: performance.now() }; }
 function startTicker() {
   stopTicker();
   try {
@@ -209,8 +252,10 @@ let onHostFx = null;
 /** Called by the renderer to see the host's own effects as they happen. */
 export function setHostFxHandler(fn) { onHostFx = fn; }
 
+let hostSince = 0;
 function becomeHost() {
   S.isHost = true;
+  hostSince = performance.now();
   S.sim = S.lastState ? Sim.fromSnapshot(S.lastState) : new Sim();
   S.sim.e = (S.cur ? S.cur.e : 0) + 1;
   pubTv = -1;
@@ -300,7 +345,7 @@ export const PAGE_URL = location.href.split("#")[0];
 export const TABLE_RE = /^stil-[a-z0-9]{4,16}$/;
 let lastAdvKey = "", pendingTable = null;
 
-function newTableName() {
+export function newTableName() {
   const a = new Uint8Array(6), abc = "abcdefghijkmnpqrstuvwxyz23456789";
   try { crypto.getRandomValues(a); } catch (_) { for (let i = 0; i < 6; i++) a[i] = (Math.random() * 256) | 0; }
   const name = "stil-" + NET_CONFIG.brokers[0].id + Array.from(a.slice(1), x => abc[x % abc.length]).join("");
@@ -348,7 +393,7 @@ export async function enterTable(name) {
   if (S.isHost) { stopTicker(); S.isHost = false; S.sim = null; }
   const old = S.room; S.room = null;
   if (old && old !== S.lobby && typeof old.leave === "function") { try { await old.leave(); } catch (_) {} }
-  S.cur = null; S.lastState = null; S.latest = null; corr.clear(); sentAt.clear(); S.rttMs = null; seenS.clear(); lastTBy.clear();
+  S.cur = null; S.lastState = null; S.latest = null; corr.clear(); sentAt.clear(); S.rttMs = null; seenS.clear(); lastTBy.clear(); S.versionBlock = null;
   S.queue = []; S.peerList = []; fxPending.length = 0; S.myPres = {};
   S.selCell = -1; S.buildType = -1; S.armedCell = -1;
   let t = null;
@@ -366,15 +411,23 @@ export async function enterTable(name) {
   if (hashTable() !== S.tableName) { try { location.hash = S.tableName; } catch (_) {} }
   attachRoom(t, onTableError);
   S.roomReady = true;
-  if (S.joined) setPresence(joinPresence());
+  // our build is visible even before we sit down, so players on another build can be told early
+  setPresence(S.joined ? joinPresence() : { v: BUILD.id, vt: BUILD.t });
   advertise(0);
   updateJoinCard(); S.uiDirty = true;
+  if (!S.joined && wasSeatedHere(S.tableName)) setTimeout(tryRejoin, 350);
   runPendingTable();
 }
 
 function attachRoom(r, onErr) {
   S.room = r;
   r.onPeers(onPeersChange, onErr || onRoomError);
+  // the host's tab closed or lost its connection: check again as soon as its state should have arrived
+  if (r.onLinkLost) r.onLinkLost(label => {
+    if (!S.cur || label !== S.cur.peer || S.isHost) return;
+    hostLinkLostAt = performance.now();
+    setTimeout(decideHost, HOST_GONE_MS + 50);
+  });
   if (r.onConnection) r.onConnection(c => {
     S.connected = c;
     if (!c && !S.disconnectedSince) S.disconnectedSince = performance.now();
@@ -399,10 +452,26 @@ export function goSolo(reason) {
   S.uiDirty = true;
 }
 
+// Remember where we sat, so a reload or reopening the link puts us back in our seat.
+const SEAT_MEMORY_MS = 10 * 60 * 1000;
+function rememberSeat() {
+  if (!S.joined || !S.tableName || S.soloMode) return;
+  try { localStorage.setItem("kv-seat", JSON.stringify({ t: S.tableName, at: Date.now() })); } catch (_) {}
+}
+/** True if we sat at this table within the last minutes and should sit down again by ourselves. */
+export function wasSeatedHere(table) {
+  try {
+    const m = JSON.parse(localStorage.getItem("kv-seat") || "null");
+    return !!m && m.t === table && Date.now() - m.at < SEAT_MEMORY_MS;
+  } catch (_) { return false; }
+}
+
 /** Sit down at the current table with the given name. */
 export function sitDown(name) {
+  if (S.versionBlock) return;
   S.myName = name;
   S.joined = true;
+  rememberSeat();
   setPresence(joinPresence());
   setTimeout(decideHost, 60);
   advertise(S.lastState ? S.lastState.w : 0);
@@ -411,6 +480,7 @@ export function sitDown(name) {
 
 export async function initNet() {
   setInterval(decideHost, 500);
+  setInterval(rememberSeat, 20000);
   document.addEventListener("visibilitychange", () => { if (S.joined) setPresence({ hid: document.hidden ? 1 : null }); });
   S.lobby = makeLobby();
   if (S.lobby.onPeers) S.lobby.onPeers(onLobbyPeers, onRoomError);

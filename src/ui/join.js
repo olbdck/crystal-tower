@@ -1,7 +1,7 @@
 // The welcome sign (sit down, open tables, table code) and inviting friends.
 import { MAX_SEATS } from "../sim/rules.js";
 import { S } from "../state.js";
-import { joinedPeers, cleanName, enterTable, goSolo, sitDown, inviteLink, lobbyTables, TABLE_RE } from "../net/session.js";
+import { joinedPeers, cleanName, enterTable, goSolo, sitDown, inviteLink, lobbyTables, TABLE_RE, newTableName } from "../net/session.js";
 import { $, toast } from "./dom.js";
 
 let lastTablesKey = "";
@@ -42,6 +42,15 @@ export function updateJoinCard() {
     return;
   }
   if (!S.roomReady) { btn.disabled = true; btn.textContent = "Підключення…"; st.textContent = S.switching ? "Переходимо до столу…" : "Шукаємо кімнату…"; return; }
+  if (S.versionBlock) {
+    const b = S.versionBlock;
+    btn.disabled = false;
+    btn.textContent = b.newer ? "Відкрити свій стіл" : "Оновити сторінку";
+    st.textContent = b.newer
+      ? `За цим столом грають на старішій версії гри (${b.name}). Попросіть друзів оновити сторінку (Ctrl+Shift+R) і зайдіть знову, або відкрийте свій стіл.`
+      : "Ваша версія гри застаріла, а за цим столом уже грають на новій. Оновіть сторінку, щоб сісти.";
+    return;
+  }
   btn.disabled = false;
   if (S.soloMode) {
     btn.textContent = "Грати соло";
@@ -56,8 +65,23 @@ export function updateJoinCard() {
     : "Сядьте, а потім запросіть друзів кнопкою «Запросити» на вільному місці.";
 }
 
+/** Back at a table we sat at a few minutes ago: sit down again under the same name. */
+export function tryRejoin() {
+  if (S.joined || !S.roomReady || S.versionBlock || S.soloMode) return;
+  let nick = "";
+  try { nick = localStorage.getItem("kv-nick") || ""; } catch (_) {}
+  if (!nick) return;
+  $("nick").value = nick;
+  doJoin();
+  toast("З поверненням! Ваше місце за столом збережено");
+}
+
+/** Reload past the browser cache, keeping the table in the address. */
+export function reloadFresh() { location.replace(location.pathname + "?r=" + Date.now() + location.hash); }
+
 export function doJoin() {
   if (S.netFailed && !S.soloMode) { const n = S.netFailed; S.netFailed = null; enterTable(n); updateJoinCard(); return; }
+  if (S.versionBlock) { if (S.versionBlock.newer) { S.invitedByHash = false; enterTable(newTableName()); } else reloadFresh(); return; }
   if (!S.roomReady) return;
   const n = cleanName($("nick").value) || "Гравець";
   try { localStorage.setItem("kv-nick", n); } catch (_) {}

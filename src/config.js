@@ -1,9 +1,10 @@
 /* global __BUILD__ */
-// Build id and settings. __BUILD__ is injected by Vite; running the sources without a build reports "src".
-export const BUILD = typeof __BUILD__ !== "undefined" ? __BUILD__ : { id: "src", t: 0 };
-
 // Test hooks: e2e tests set window.KV_TEST before the page loads (e.g. { noRender: true }).
 export const TEST = (typeof window !== "undefined" && window.KV_TEST) || {};
+
+// Build id and time. __BUILD__ is injected by Vite; running the sources without a build reports "src".
+// Players at one table must run the same build; see the version check in net/session.js.
+export const BUILD = TEST.build || (typeof __BUILD__ !== "undefined" ? __BUILD__ : { id: "src", t: 0 });
 
 // Network settings. Tests and self-hosters can override any field with window.KV_NET_CONFIG.
 // Players talk directly browser-to-browser over WebRTC data channels, one channel per pair of players.
