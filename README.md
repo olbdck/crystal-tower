@@ -20,26 +20,27 @@ Keys: `1–4` towers, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
 
 ## How it works
 
-- The whole game is a single `index.html` file. Three.js and PeerJS load from a CDN.
-- Players connect directly between browsers over WebRTC. The free [PeerJS Cloud](https://peerjs.com/server/cloud) server only helps them find each other.
-- One browser at the table relays data between players, and one (not necessarily the same) runs the simulation. If either leaves, the role passes to another player and the game continues.
+- The whole game is a single `index.html` file. Three.js and MQTT.js load from a CDN.
+- Players exchange game state through a public MQTT broker over a secure WebSocket (WSS). Because nothing connects browser-to-browser, it works from any network, including mobile data and strict home routers.
+- The first letter of the table code tells which broker the table uses (`e` = EMQX, `h` = HiveMQ, `m` = Mosquitto). If the first broker is down when a table is created, the next one is used automatically.
+- One player's browser runs the simulation. If that player leaves, another takes over and the game continues.
 - A player who drops out briefly or reloads the tab keeps their seat and gold for 10 seconds.
 - When everyone leaves a table, it disappears.
 
-## If someone cannot connect
+Note: public brokers are open, so anyone who knows a table code could read that table's game messages. The game sends nothing beyond player names and game state.
 
-The usual cause is a strict NAT: mobile data, corporate or hotel networks. A direct connection is not possible there, so a TURN server is needed to relay the traffic.
+## Using your own broker
 
-At the top of the `P2P TRANSPORT` block in `index.html` there is a `NET_CONFIG` setting. Add your TURN server there, for example from the free tier at [Metered](https://www.metered.ca/stun-turn) or your own coturn:
+At the top of the `NETWORK TRANSPORT` block in `index.html` there is a `NET_CONFIG` setting. Put your broker first in `brokers`, for example a free managed MQTT service or your own Mosquitto/EMQX with WebSockets enabled:
 
 ```js
-iceServers: [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "turn:your-turn.example.com:3478", username: "user", credential: "pass" },
+brokers: [
+  { id: "x", url: "wss://mqtt.example.com:8084/mqtt" },
+  { id: "e", url: "wss://broker.emqx.io:8084/mqtt" },
 ],
 ```
 
-If the public PeerJS Cloud is unavailable, run your own server (`npx peerjs --port 9000`) and set it in `peerServer: { host, port, path, secure }`.
+Rendering adapts to the device: resolution is capped at 1.5× and lowers itself if the frame rate drops.
 
 ## Running locally
 

@@ -68,6 +68,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 .net .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--parch-0); flex: none; }
 .net.on .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 .net.warn .dot { background: var(--gold-2); }
+.codebtn {
+  display: inline-flex; align-items: center; gap: 5px; margin-left: 2px; padding: 2px 8px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--gold-0); background: var(--wood-0); color: var(--gold-2);
+  font-family: var(--font-label); font-size: 13px; letter-spacing: .08em; line-height: 1.3;
+}
+.codebtn:hover { background: var(--wood-1); color: var(--gold-3); border-color: var(--gold-1); }
+.codebtn svg { width: 12px; height: 12px; flex: none; }
 .roundbtn {
   width: 38px; height: 38px; border-radius: 50%; border: 0; cursor: pointer; flex: none;
   background: radial-gradient(circle at 40% 35%, var(--wood-3), var(--wood-1));
@@ -275,6 +282,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
   font-family: var(--font-display); font-size: 17px;
 }
 .card.poor .cost { background: radial-gradient(circle at 35% 30%, #ffc2b8, #c4392d 55%, #6b130c); }
+.card.poor:not(.sel) .face { filter: grayscale(.8) brightness(.45); }
+.card.poor:not(.sel):hover .face, .card.poor:not(.sel):focus-visible .face { filter: grayscale(.6) brightness(.62); }
 .card kbd { position: absolute; right: 9px; top: 7px; z-index: 3; font-family: var(--font-label); font-size: 11px; color: var(--ink-soft); }
 
 /* ---------- overlays ---------- */
@@ -388,7 +397,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
       <div class="topleft">
         <div class="plaque">
           <h1>Кристальна Варта</h1>
-          <div class="net" id="net"><span class="dot"></span><span id="netText">Підключення…</span></div>
+          <div class="net" id="net"><span class="dot"></span><span id="netText">Підключення…</span><button class="codebtn" id="codeBtn" type="button" hidden title="Скопіювати код столу" aria-label="Скопіювати код столу"><span id="codeTxt"></span><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8.5" height="8.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3.5 10.5h-.5A1.5 1.5 0 0 1 1.5 9V3A1.5 1.5 0 0 1 3 1.5h6A1.5 1.5 0 0 1 10.5 3v.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button></div>
         </div>
         <button class="roundbtn" id="helpBtn" type="button" aria-label="Як грати">?</button>
       </div>
@@ -442,6 +451,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
         <label for="nick">Як вас звати?</label>
         <input id="nick" maxlength="16" placeholder="Напр. Олег">
         <button class="btn" id="joinBtn" type="submit" disabled>Підключення…</button>
+        <button class="btn wood" id="soloBtn" type="button" hidden>Грати соло</button>
         <p class="small" id="joinStatus">Шукаємо кімнату…</p>
         <div class="tables" id="tableList" hidden></div>
         <div class="coderow">
@@ -497,7 +507,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.16.0/dist/mqtt.min.js"></script>
 <script>
 "use strict";
 /*SIM-START*/
@@ -841,64 +851,74 @@ function synergyAt(towers, tw) {
 }
 /*SIM-END*/
 
-/* ===================== P2P TRANSPORT (PeerJS / WebRTC) ===================== */
-// Networking. By default the game uses the free PeerJS Cloud so players can find each other,
-// plus Google's STUN servers. After that, data flows directly between browsers.
-// For connections to work behind strict NAT (some mobile networks, corporate Wi-Fi),
-// add a TURN server to iceServers, for example:
-//   { urls: "turn:your-turn.example.com:3478", username: "user", credential: "pass" }
-// Your own PeerJS server: peerServer: { host: "peer.example.com", port: 443, path: "/", secure: true }
+/* ===================== NETWORK TRANSPORT (MQTT over secure WebSocket) ===================== */
+// Players exchange their state through a public MQTT broker over WSS, which works from any network
+// (no direct browser-to-browser connection, so strict NAT on mobile or home networks is not a problem).
+// Each player publishes one retained "presence" message per table; the broker's last-will clears it on disconnect.
+// The first letter of a table code says which broker the table lives on, so friends always land on the same one.
+// To use your own broker, list it first, e.g. { id: "x", url: "wss://mqtt.example.com:8084/mqtt" }.
 const NET_CONFIG = Object.assign({
-  idPrefix: "kryshtalna-varta-v1-",
-  peerServer: null,
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
+  topicRoot: "crystal-tower/v1",
+  brokers: [
+    { id: "e", url: "wss://broker.emqx.io:8084/mqtt" },
+    { id: "h", url: "wss://broker.hivemq.com:8884/mqtt" },
+    { id: "m", url: "wss://test.mosquitto.org:8081" },
   ],
 }, window.KV_NET_CONFIG || {});
 
-function peerOptions() {
-  const o = { debug: 0, config: { iceServers: NET_CONFIG.iceServers } };
-  if (NET_CONFIG.peerServer) Object.assign(o, NET_CONFIG.peerServer);
-  return o;
-}
+const PEER_STALE_MS = 60000, HEARTBEAT_MS = 4000;
+
 function randLabel() {
   const a = new Uint8Array(10), abc = "abcdefghijklmnopqrstuvwxyz0123456789";
   try { crypto.getRandomValues(a); } catch (_) { for (let i = 0; i < a.length; i++) a[i] = (Math.random() * 256) | 0; }
   return Array.from(a, x => abc[x % abc.length]).join("");
 }
+function tabLabel() {
+  try {
+    let v = sessionStorage.getItem("kv-peer");
+    if (!/^[a-z0-9]{10}$/.test(v || "")) { v = randLabel(); sessionStorage.setItem("kv-peer", v); }
+    return v;
+  } catch (_) { return randLabel(); }
+}
+function brokerFor(name) {
+  const letter = name.slice(5, 6);
+  return NET_CONFIG.brokers.find(b => b.id === letter) || NET_CONFIG.brokers[0];
+}
+const generatedHere = new Set();
 
-// The game's network code talks to a "room": everyone's presence object, kept in sync.
-// Here one browser at the table (the hub) owns the table's PeerJS id and relays presence between players.
-// If the hub leaves, the remaining players claim the id in turn and reconnect; the game state lives in presence,
-// so play continues.
-function makeP2PLobby() {
+function makeMqttLobby() {
   return {
     onPeers() { return () => {}; },
     presence() { return Promise.resolve(); },
-    join: name => joinP2PTable(name),
+    async join(name) {
+      try { return await joinMqttTable(name, brokerFor(name)); }
+      catch (err) {
+        // a table created in this tab may move to another broker if its first choice is down
+        if (!generatedHere.has(name)) throw err;
+        for (const b of NET_CONFIG.brokers) {
+          if (b === brokerFor(name)) continue;
+          const alt = "stil-" + b.id + name.slice(6);
+          generatedHere.add(alt);
+          try { return await joinMqttTable(alt, b); } catch (_) {}
+        }
+        throw err;
+      }
+    },
   };
 }
 
-function joinP2PTable(name) {
-  const hubId = NET_CONFIG.idPrefix + name;
-  const me = (() => {
-    try {
-      let v = sessionStorage.getItem("kv-peer");
-      if (!/^[a-z0-9]{10}$/.test(v || "")) { v = randLabel(); sessionStorage.setItem("kv-peer", v); }
-      return v;
-    } catch (_) { return randLabel(); }
-  })();
-  let pres = {}, others = new Map(), handlers = [], connHandlers = [], isConn = false, closed = false;
-  let role = null, hubPeer = null, clientPeer = null, hubConn = null, hubLabel = null, flushTimer = 0, cache = null;
-  let pendingConnectReject = null;
-  const clients = new Map();
+function joinMqttTable(name, broker) {
+  const me = tabLabel();
+  const base = `${NET_CONFIG.topicRoot}/${name}/p/`;
+  const myTopic = base + me;
+  let pres = Object.freeze({}), others = new Map(), handlers = [], connHandlers = [], closed = false, cache = null;
+  let flushTimer = 0, lastSent = 0, hbTimer = 0, staleTimer = 0;
 
   const wrap = (label, p) => Object.freeze({ peer: label, by: null, isMe: label === me, sameTab: label === me, kind: "viewer", guest: false, presence: p, updatedAt: Date.now() });
   function list() {
     if (cache) return cache;
     const arr = [wrap(me, pres)];
-    for (const [l, p] of others) arr.push(wrap(l, p));
+    for (const [l, o] of others) arr.push(wrap(l, o.p));
     return (cache = Object.freeze(arr));
   }
   function notify(left) {
@@ -906,159 +926,19 @@ function joinP2PTable(name) {
     const ch = { peers: list(), joined: [], left: left || [], updated: [] };
     queueMicrotask(() => { for (const h of handlers.slice()) { try { h(ch); } catch (e) { console.error(e); } } });
   }
-  function setConn(c) {
-    if (c === isConn) return;
-    isConn = c;
-    for (const h of connHandlers.slice()) { try { h(c); } catch (_) {} }
-  }
-  function send(conn, msg) { try { if (conn && conn.open) conn.send(msg); } catch (_) {} }
-  function broadcast(msg, except) { for (const c of clients.keys()) if (c !== except) send(c, msg); }
-  const okId = id => typeof id === "string" && /^[a-z0-9]{6,16}$/.test(id);
-  const okP = p => p && typeof p === "object" && !Array.isArray(p);
+  function emitConn(c) { for (const h of connHandlers.slice()) { try { h(c); } catch (_) {} } }
 
-  /* ---- hub side ---- */
-  function claimHub() {
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      const p = new Peer(hubId, peerOptions());
-      const t = setTimeout(() => { if (settled) return; settled = true; try { p.destroy(); } catch (_) {} reject({ type: "timeout" }); }, 12000);
-      p.on("open", () => { if (settled) return; settled = true; clearTimeout(t); resolve(p); });
-      p.on("error", err => { if (settled) return; settled = true; clearTimeout(t); try { p.destroy(); } catch (_) {} reject(err || { type: "unknown" }); });
-    });
-  }
-  function becomeHub(p, migrating) {
-    role = "hub"; hubPeer = p; hubLabel = me; hubConn = null;
-    if (clientPeer) { try { clientPeer.destroy(); } catch (_) {} clientPeer = null; }
-    clients.clear();
-    if (!migrating) others = new Map();
-    else setTimeout(() => {
-      const live = new Set(clients.values()), left = [];
-      for (const [l, pr] of others) if (!live.has(l)) { left.push(wrap(l, pr)); others.delete(l); }
-      if (left.length) { for (const x of left) broadcast({ t: "x", id: x.peer }); notify(left); }
-    }, 15000);
-    notify();
-    setConn(true);
-    p.on("connection", conn => {
-      conn.on("data", msg => onHubData(conn, msg));
-      conn.on("close", () => dropClient(conn));
-      conn.on("error", () => dropClient(conn));
-    });
-    p.on("disconnected", () => { if (!closed && !p.destroyed) setTimeout(() => { try { if (!p.destroyed) p.reconnect(); } catch (_) {} }, 1500); });
-    p.on("error", () => {});
-  }
-  function onHubData(conn, msg) {
-    if (!okP(msg) || closed) return;
-    if (msg.t === "hi" && okId(msg.id) && msg.id !== me) {
-      if (clients.size >= 12) { send(conn, { t: "full" }); try { conn.close(); } catch (_) {} return; }
-      clients.set(conn, msg.id);
-      const all = [[me, pres]];
-      for (const [l, p] of others) all.push([l, p]);
-      send(conn, { t: "all", hub: me, list: all });
-      if (okP(msg.p)) {
-        others.set(msg.id, Object.freeze(msg.p));
-        broadcast({ t: "p", id: msg.id, p: msg.p }, conn);
-        notify();
-      }
-    } else if (msg.t === "p" && okP(msg.p)) {
-      const id = clients.get(conn);
-      if (!id) return;
-      others.set(id, Object.freeze(msg.p));
-      broadcast({ t: "p", id, p: msg.p }, conn);
-      notify();
-    }
-  }
-  function dropClient(conn) {
-    const id = clients.get(conn);
-    if (!id) return;
-    clients.delete(conn);
-    if ([...clients.values()].includes(id)) return;
-    const old = others.get(id);
-    others.delete(id);
-    broadcast({ t: "x", id });
-    notify(old ? [wrap(id, old)] : []);
-  }
+  const client = mqtt.connect(broker.url, {
+    clientId: "ct_" + me + "_" + randLabel().slice(0, 6),
+    keepalive: 15, clean: true, reconnectPeriod: 2000, connectTimeout: 15000, resubscribe: true,
+    will: { topic: myTopic, payload: "", qos: 0, retain: true },
+  });
 
-  /* ---- client side ---- */
-  function openClientPeer() {
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      const p = new Peer(peerOptions());
-      const t = setTimeout(() => { if (settled) return; settled = true; try { p.destroy(); } catch (_) {} reject({ type: "timeout" }); }, 12000);
-      p.on("open", () => { if (settled) return; settled = true; clearTimeout(t); resolve(p); });
-      p.on("error", err => {
-        if (!settled) { settled = true; clearTimeout(t); try { p.destroy(); } catch (_) {} reject(err || { type: "unknown" }); return; }
-        if (pendingConnectReject && err && (err.type === "peer-unavailable" || err.type === "network")) { const r = pendingConnectReject; pendingConnectReject = null; r(err); }
-      });
-      p.on("disconnected", () => { if (!closed && !p.destroyed) setTimeout(() => { try { if (!p.destroyed) p.reconnect(); } catch (_) {} }, 1500); });
-    });
-  }
-  async function connectToHub() {
-    if (!clientPeer || clientPeer.destroyed) clientPeer = await openClientPeer();
-    await new Promise((resolve, reject) => {
-      let opened = false, done = false;
-      const fail = err => { if (done) return; done = true; pendingConnectReject = null; clearTimeout(timer); try { conn.close(); } catch (_) {} reject(err || { type: "conn" }); };
-      const conn = clientPeer.connect(hubId, { reliable: true, serialization: "json" });
-      const timer = setTimeout(() => fail({ type: "timeout" }), 7000);
-      pendingConnectReject = fail;
-      conn.on("open", () => {
-        if (done) return;
-        done = true; opened = true; pendingConnectReject = null; clearTimeout(timer);
-        hubConn = conn; role = "client";
-        send(conn, { t: "hi", id: me, p: pres });
-        setConn(true);
-        resolve();
-      });
-      conn.on("data", msg => { if (hubConn === conn) onClientData(msg); });
-      conn.on("close", () => { if (hubConn === conn) onHubLost(); else if (!opened) fail({ type: "closed" }); });
-      conn.on("error", err => { if (!opened) fail(err); });
-    });
-  }
-  function onClientData(msg) {
-    if (!okP(msg) || closed) return;
-    if (msg.t === "all" && Array.isArray(msg.list)) {
-      hubLabel = okId(msg.hub) ? msg.hub : null;
-      const prev = others;
-      others = new Map();
-      for (const it of msg.list) if (Array.isArray(it) && okId(it[0]) && it[0] !== me && okP(it[1])) others.set(it[0], Object.freeze(it[1]));
-      const left = [];
-      for (const [l, p] of prev) if (!others.has(l)) left.push(wrap(l, p));
-      notify(left);
-    } else if (msg.t === "p" && okId(msg.id) && msg.id !== me && okP(msg.p)) {
-      others.set(msg.id, Object.freeze(msg.p));
-      notify();
-    } else if (msg.t === "x" && okId(msg.id)) {
-      const old = others.get(msg.id);
-      if (old) { others.delete(msg.id); notify([wrap(msg.id, old)]); }
-    }
-  }
-  function onHubLost() {
-    if (closed) return;
-    hubConn = null; role = null;
-    setConn(false);
-    const left = [];
-    if (hubLabel && others.has(hubLabel)) { left.push(wrap(hubLabel, others.get(hubLabel))); others.delete(hubLabel); }
-    notify(left);
-    const order = [...others.keys(), me].sort();
-    recover(Math.max(0, order.indexOf(me)), 0);
-  }
-  function recover(rank, attempt) {
-    if (closed) return;
-    const delay = attempt === 0 ? 250 + rank * 1400 : 1200 + Math.random() * 800;
-    setTimeout(async () => {
-      if (closed || role) return;
-      if (rank > 0 || attempt > 0) { try { await connectToHub(); return; } catch (_) {} }
-      if (closed || role) return;
-      try { const hp = await claimHub(); if (closed) { try { hp.destroy(); } catch (_) {} return; } becomeHub(hp, true); return; } catch (_) {}
-      if (attempt < 60) recover(rank, attempt + 1);
-    }, delay);
-  }
-
-  /* ---- presence ---- */
   function flush() {
     flushTimer = 0;
-    if (closed) return;
-    if (role === "hub") broadcast({ t: "p", id: me, p: pres });
-    else if (role === "client" && hubConn) send(hubConn, { t: "p", p: pres });
+    if (closed || !client.connected) return;
+    lastSent = Date.now();
+    client.publish(myTopic, JSON.stringify({ p: pres }), { qos: 0, retain: true });
   }
   function presence(patch) {
     if (closed) return Promise.reject({ code: "invalid_argument", message: "left" });
@@ -1070,6 +950,33 @@ function joinP2PTable(name) {
     return Promise.resolve();
   }
 
+  client.on("message", (topic, payload) => {
+    if (closed || !topic.startsWith(base)) return;
+    const label = topic.slice(base.length);
+    if (label === me || !/^[a-z0-9]{6,16}$/.test(label)) return;
+    if (!payload || !payload.length) {
+      const old = others.get(label);
+      if (old) { others.delete(label); notify([wrap(label, old.p)]); }
+      return;
+    }
+    let msg = null;
+    try { msg = JSON.parse(new TextDecoder().decode(payload)); } catch (_) { return; }
+    if (!msg || typeof msg.p !== "object" || !msg.p || Array.isArray(msg.p)) return;
+    others.set(label, { p: Object.freeze(msg.p), at: Date.now() });
+    notify();
+  });
+  client.on("connect", () => { if (!closed) { lastSent = 0; flush(); emitConn(true); } });
+  client.on("close", () => { if (!closed) emitConn(false); });
+  client.on("offline", () => { if (!closed) emitConn(false); });
+  client.on("error", () => {});
+
+  hbTimer = setInterval(() => { if (!closed && client.connected && Date.now() - lastSent > HEARTBEAT_MS) flush(); }, 1000);
+  staleTimer = setInterval(() => {
+    const now = Date.now(), left = [];
+    for (const [l, o] of others) if (now - o.at > PEER_STALE_MS) { left.push(wrap(l, o.p)); others.delete(l); }
+    if (left.length) notify(left);
+  }, 2000);
+
   const api = {
     name,
     presence,
@@ -1080,10 +987,10 @@ function joinP2PTable(name) {
       queueMicrotask(() => { try { h({ peers, joined: peers, left: [], updated: [] }); } catch (e) { console.error(e); } });
       return () => { handlers = handlers.filter(x => x !== h); };
     },
-    connected: () => isConn,
+    connected: () => client.connected,
     onConnection(h) {
       connHandlers.push(h);
-      queueMicrotask(() => { try { h(isConn); } catch (_) {} });
+      queueMicrotask(() => { try { h(client.connected); } catch (_) {} });
       return () => { connHandlers = connHandlers.filter(x => x !== h); };
     },
     emit: () => Promise.resolve(),
@@ -1091,26 +998,30 @@ function joinP2PTable(name) {
     leave() {
       if (closed) return Promise.resolve();
       closed = true; handlers = []; connHandlers = [];
-      clearTimeout(flushTimer);
-      for (const c of clients.keys()) { try { c.close(); } catch (_) {} }
-      clients.clear();
-      if (hubConn) { try { hubConn.close(); } catch (_) {} hubConn = null; }
-      for (const p of [hubPeer, clientPeer]) if (p) { try { p.destroy(); } catch (_) {} }
+      clearTimeout(flushTimer); clearInterval(hbTimer); clearInterval(staleTimer);
+      try { if (client.connected) client.publish(myTopic, "", { qos: 0, retain: true }); } catch (_) {}
+      try { client.end(false); } catch (_) {}
       return Promise.resolve();
     },
   };
   addEventListener("pagehide", () => { api.leave(); });
 
-  return (async () => {
-    try {
-      becomeHub(await claimHub());
-    } catch (err) {
-      if (!err || err.type !== "unavailable-id") throw err;
-      try { await connectToHub(); }
-      catch (_) { becomeHub(await claimHub()); }
-    }
-    return api;
-  })();
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const fail = err => { if (done) return; done = true; clearInterval(t); api.leave(); reject(err || { type: "connect" }); };
+    // count only seconds when the page is responsive, so a slow first load does not use up the wait
+    let ticks = 0;
+    const t = setInterval(() => { if (++ticks >= 20) fail({ type: "timeout" }); }, 1000);
+    client.once("connect", () => {
+      client.subscribe(base + "+", { qos: 0 }, err => {
+        if (done) return;
+        if (err) { fail(err); return; }
+        done = true; clearInterval(t);
+        // give retained presences a moment to arrive so the join screen shows who is at the table
+        setTimeout(() => resolve(api), 400);
+      });
+    });
+  });
 }
 
 /* ===================== NETWORK ===================== */
@@ -1339,12 +1250,14 @@ function cleanName(n) {
 
 const ARTIFACT_URL = location.href.split("#")[0];
 const TABLE_RE = /^stil-[a-z0-9]{4,16}$/;
-let lobby = null, tableName = null, switching = false, invitedByHash = false, lastAdvKey = "";
+let lobby = null, tableName = null, switching = false, invitedByHash = false, lastAdvKey = "", netFailed = null;
 const lobbyTables = new Map();
 function newTableName() {
   const a = new Uint8Array(6), abc = "abcdefghijkmnpqrstuvwxyz23456789";
   try { crypto.getRandomValues(a); } catch (_) { for (let i = 0; i < 6; i++) a[i] = (Math.random() * 256) | 0; }
-  return "stil-" + Array.from(a, x => abc[x % abc.length]).join("");
+  const name = "stil-" + NET_CONFIG.brokers[0].id + Array.from(a.slice(1), x => abc[x % abc.length]).join("");
+  generatedHere.add(name);
+  return name;
 }
 function hashTable() { const h = (location.hash || "").slice(1).toLowerCase(); return TABLE_RE.test(h) ? h : null; }
 function inviteLink() { return tableName ? ARTIFACT_URL + "#" + tableName : ARTIFACT_URL; }
@@ -1376,8 +1289,14 @@ function advertise(w) {
   lastAdvKey = key;
   try { const pr = lobby.presence(patch); if (pr && pr.catch) pr.catch(() => {}); } catch (_) {}
 }
+let pendingTable = null;
+function runPendingTable() {
+  if (pendingTable && pendingTable !== tableName && !switching) { const n = pendingTable; pendingTable = null; enterTable(n); }
+  else pendingTable = null;
+}
 async function enterTable(name) {
-  if (switching || !lobby || soloMode) return;
+  if (!lobby || soloMode) return;
+  if (switching) { pendingTable = name; return; }
   switching = true; roomReady = false; uiDirty = true;
   if (isHost) { clearInterval(hostTimer); hostTimer = null; isHost = false; sim = null; }
   const old = room; room = null;
@@ -1387,14 +1306,22 @@ async function enterTable(name) {
   let t = null;
   try { t = await lobby.join(name); } catch (_) { t = null; }
   switching = false;
-  if (!t) { goSolo("Не вдалося підключитися до мережі гри, граємо соло"); return; }
-  tableName = name;
-  if (hashTable() !== name) { try { location.hash = name; } catch (_) {} }
+  if (!t) {
+    netFailed = name; joined = false;
+    $("joinOverlay").hidden = false;
+    updateJoinCard(); uiDirty = true;
+    if (pendingTable && pendingTable !== name) { netFailed = null; runPendingTable(); }
+    return;
+  }
+  netFailed = null;
+  tableName = t.name || name;
+  if (hashTable() !== tableName) { try { location.hash = tableName; } catch (_) {} }
   attachRoom(t, onTableError);
   roomReady = true;
   if (joined) setPresence({ n: myName, j: Date.now(), hid: document.hidden ? 1 : null });
   advertise(0);
   updateJoinCard(); uiDirty = true;
+  runPendingTable();
 }
 
 function attachRoom(r, onErr) {
@@ -1423,8 +1350,8 @@ function goSolo(reason) {
 }
 
 async function initNet() {
-  if (typeof Peer === "undefined") { goSolo("Не вдалося завантажити мережевий модуль, граємо соло"); return; }
-  lobby = makeP2PLobby();
+  if (typeof mqtt === "undefined") { goSolo("Не вдалося завантажити мережевий модуль, граємо соло"); return; }
+  lobby = makeMqttLobby();
   const h = hashTable();
   invitedByHash = !!h;
   await enterTable(h || newTableName());
@@ -1523,8 +1450,48 @@ function initMaterials() {
   MAT.pend = basic(0xffffff, { op: 0.35 });
   MAT.wax = std(0xf3e7c9, { r: 0.6 });
   MAT.flame = basic(0xffc66b, { op: 0.95, add: true });
+  MAT.blob = basic(0x000000, { op: 0.38 });
+  for (const k in MAT) if (MAT[k] && MAT[k].isMaterial) MAT[k].userData.slot = k;
+  MAT.seat.forEach(m => { m.userData.slot = "seat"; });
 }
 
+const MERGED = new Map();
+let shadowDirty = true, lastTurretShadow = 0;
+function mergeGeos(list) {
+  let n = 0;
+  for (const g of list) n += g.attributes.position.count;
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3);
+  let o = 0;
+  for (const g of list) { pos.set(g.attributes.position.array, o * 3); nor.set(g.attributes.normal.array, o * 3); o += g.attributes.position.count; }
+  const m = new THREE.BufferGeometry();
+  m.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  m.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  m.computeBoundingSphere(); m.computeBoundingBox();
+  return m;
+}
+// Collapse a model's static parts into one mesh per material (geometry cached per model type),
+// which cuts draw calls per tower/enemy from ~15 to 2-4.
+function bakeStatic(g, key, keep, shadow) {
+  const groups = new Map();
+  for (const ch of g.children.slice()) {
+    if (!ch.isMesh || keep.has(ch)) continue;
+    const slot = (ch.material.userData && ch.material.userData.slot) || ch.material.uuid;
+    if (!groups.has(slot)) groups.set(slot, { mat: ch.material, meshes: [] });
+    groups.get(slot).meshes.push(ch);
+  }
+  for (const [slot, grp] of groups) {
+    const k = key + "|" + slot;
+    let geom = MERGED.get(k);
+    if (!geom) {
+      geom = mergeGeos(grp.meshes.map(m => { m.updateMatrix(); const gg = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone(); gg.applyMatrix4(m.matrix); return gg; }));
+      MERGED.set(k, geom);
+    }
+    for (const m of grp.meshes) g.remove(m);
+    const mm = new THREE.Mesh(geom, grp.mat);
+    mm.castShadow = shadow; mm.receiveShadow = shadow;
+    g.add(mm);
+  }
+}
 function part(g, geometry, material, x, y, z, o) {
   const m = new THREE.Mesh(geometry, material);
   m.position.set(x, y, z);
@@ -1587,6 +1554,9 @@ function towerModel(ty, lv, seatMat, ghost) {
     ud.top = ud.orbY;
   }
   for (let i = 0; i < lv; i++) part(g, geo("pip", () => new THREE.SphereGeometry(0.045, 8, 6)), M(MAT.gold), (i - (lv - 1) / 2) * 0.13, 0.1, 0.41, { noShadow: true });
+  if (ud.crystal) ud.crystal.castShadow = false;
+  bakeStatic(g, `t${ty}-${lv}`, new Set([ud.flag, ud.crystal, ud.orb, ...(ud.shards || [])].filter(Boolean)), !ghost);
+  if (ud.turret) bakeStatic(ud.turret, `tt${lv}`, new Set(), !ghost);
   g.userData = ud;
   return g;
 }
@@ -1634,6 +1604,10 @@ function enemyModel(ty) {
   }
   ud.frost = part(g, geo("frostRing", () => new THREE.TorusGeometry(ty === 3 ? 0.46 : 0.3, 0.03, 6, 24)), MAT.ice, 0, 0.06, 0, { rx: Math.PI / 2, noShadow: true });
   ud.frost.visible = false;
+  bakeStatic(body, "e" + ty, new Set(), false);
+  const blob = part(g, geo("blob", () => new THREE.CircleGeometry(1, 20)), MAT.blob, 0, 0.016, 0, { rx: -Math.PI / 2, noShadow: true });
+  blob.scale.setScalar([0.24, 0.24, 0.33, 0.5][ty]);
+  ud.blob = blob;
   const sc = [1.35, 1.35, 1.25, 1.2][ty];
   g.scale.setScalar(sc); ud.h *= sc;
   g.userData = ud;
@@ -1801,7 +1775,7 @@ function buildWorld() {
   part(scene, new THREE.CylinderGeometry(0.26, 0.31, 0.16, 8), MAT.stoneDark, cx, 0.36, cz);
   part(scene, new THREE.TorusGeometry(0.27, 0.035, 8, 24), MAT.gold, cx, 0.44, cz, { rx: Math.PI / 2 });
   crystal.group = new THREE.Group(); crystal.group.position.set(cx, 1.0, cz); crystal.group.scale.setScalar(1.35); scene.add(crystal.group);
-  crystal.main = part(crystal.group, new THREE.OctahedronGeometry(0.36, 0), MAT.crystal, 0, 0, 0, { s: [1, 1.75, 1] });
+  crystal.main = part(crystal.group, new THREE.OctahedronGeometry(0.36, 0), MAT.crystal, 0, 0, 0, { s: [1, 1.75, 1], noShadow: true });
   crystal.sats = [];
   for (let i = 0; i < 4; i++) crystal.sats.push(part(crystal.group, geo("sat", () => new THREE.OctahedronGeometry(0.09, 0)), MAT.crystal, 0, 0, 0, { s: [1, 1.6, 1], noShadow: true }));
   crystal.halo = glowSprite(0xa77bff, 2.6, 0.5); crystal.group.add(crystal.halo);
@@ -1882,9 +1856,19 @@ function fitCamera() {
   camera.updateMatrixWorld(true);
   lastLayout = narrow ? "n" : "w";
 }
+// Render resolution: at most 1.5x, and it drops step by step if frames take too long.
+let qualityCap = 1.5, perfFrames = 0, perfTime = 0, perfStart = performance.now() + 4000;
+function trackPerf(now, dt) {
+  if (now < perfStart || dt > 250) return;
+  perfFrames++; perfTime += dt;
+  if (perfFrames < 90) return;
+  const avg = perfTime / perfFrames;
+  perfFrames = 0; perfTime = 0;
+  if (avg > 24 && qualityCap > 1 && (window.devicePixelRatio || 1) > 1) { qualityCap = Math.max(1, qualityCap - 0.25); perfStart = now + 1500; resizeAll(); }
+}
 function resizeAll() {
   W = Math.max(1, stage.clientWidth); H = Math.max(1, stage.clientHeight);
-  DPR = Math.min(2, window.devicePixelRatio || 1);
+  DPR = Math.min(qualityCap, window.devicePixelRatio || 1);
   ov.width = Math.round(W * DPR); ov.height = Math.round(H * DPR);
   if (renderer) { renderer.setPixelRatio(DPR); renderer.setSize(W, H, false); fitCamera(); }
 }
@@ -1923,9 +1907,14 @@ function syncTowers(v, now, dt) {
     }
     if (!o) { o = makeTowerObj(tw, now); if (worldReady) ringBurst(new THREE.Vector3(tw.c % COLS + 0.5, 0.05, ((tw.c / COLS) | 0) + 0.5), 0xe3cfa2, 0.6, 380); }
     const age = (now - o.born) / 1000;
-    o.g.scale.setScalar(age < 0.35 ? Math.max(0.01, easeOutBack(age / 0.35)) : 1);
+    if (age < 0.45) { o.g.scale.setScalar(age < 0.35 ? Math.max(0.01, easeOutBack(age / 0.35)) : 1); shadowDirty = true; }
+    else if (o.g.scale.x !== 1) { o.g.scale.setScalar(1); shadowDirty = true; }
     const ud = o.g.userData, ph = tw.c * 1.7;
-    if (ud.turret) { o.aim = angLerp(o.aim, o.aimT, Math.min(1, dt * 9)); ud.turret.rotation.y = o.aim; }
+    if (ud.turret) {
+      const moving = Math.abs(o.aimT - o.aim) > 0.04;
+      o.aim = angLerp(o.aim, o.aimT, Math.min(1, dt * 9)); ud.turret.rotation.y = o.aim;
+      if (moving && now - lastTurretShadow > 250) { lastTurretShadow = now; shadowDirty = true; }
+    }
     if (ud.crystal) {
       ud.crystal.rotation.y = now * 0.0012 + ph;
       ud.crystal.position.y = ud.crystalY + Math.sin(now * 0.002 + ph) * 0.04;
@@ -1935,7 +1924,7 @@ function syncTowers(v, now, dt) {
     if (ud.flag) ud.flag.rotation.y = Math.sin(now * 0.004 + ph) * 0.35;
   }
   for (const [c, o] of towerObjs) if (!seen.has(c)) {
-    towerRoot.remove(o.g); towerObjs.delete(c);
+    towerRoot.remove(o.g); towerObjs.delete(c); shadowDirty = true;
     ringBurst(new THREE.Vector3(c % COLS + 0.5, 0.05, ((c / COLS) | 0) + 0.5), 0x9b8a70, 0.7, 380);
   }
 }
@@ -1944,6 +1933,7 @@ function makeTowerObj(tw, now) {
   g.position.set(tw.c % COLS + 0.5, 0, ((tw.c / COLS) | 0) + 0.5);
   g.userData.cell = tw.c;
   towerRoot.add(g);
+  shadowDirty = true;
   const o = { g, ty: tw.ty, lv: tw.lv, o: tw.o, born: worldReady ? now : now - 1000, aim: 0, aimT: 0 };
   towerObjs.set(tw.c, o);
   return o;
@@ -1979,8 +1969,9 @@ function syncSynergy(v) {
   const key = v.towers.map(t => t.c + ":" + t.o).join(",");
   if (key === synKey) return;
   synKey = key;
-  while (synRoot.children.length) synRoot.remove(synRoot.children[0]);
-  const box = geo("link", () => new THREE.BoxGeometry(1, 1, 1));
+  while (synRoot.children.length) { const ch = synRoot.children[0]; synRoot.remove(ch); if (ch.geometry) ch.geometry.dispose(); }
+  const box = geo("linkNI", () => new THREE.BoxGeometry(1, 1, 1).toNonIndexed());
+  const parts = [], mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
   for (const tw of v.towers) {
     const x = tw.c % COLS, y = (tw.c / COLS) | 0;
     for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [-1, 1]]) {
@@ -1989,11 +1980,12 @@ function syncSynergy(v) {
       const nb = v.tmap.get(ny * COLS + nx);
       if (!nb || nb.o === tw.o) continue;
       const len = Math.hypot(dx, dy) - 0.62;
-      const m = part(synRoot, box, MAT.link, x + 0.5 + dx / 2, 0.19, y + 0.5 + dy / 2, { noShadow: true });
-      m.scale.set(0.06, 0.04, len);
-      m.rotation.y = Math.atan2(dx, dy);
+      q.setFromAxisAngle(up, Math.atan2(dx, dy));
+      mtx.compose(new THREE.Vector3(x + 0.5 + dx / 2, 0.19, y + 0.5 + dy / 2), q, new THREE.Vector3(0.06, 0.04, len));
+      parts.push(box.clone().applyMatrix4(mtx));
     }
   }
+  if (parts.length) synRoot.add(new THREE.Mesh(mergeGeos(parts), MAT.link));
 }
 
 function updateCrystal(v, now) {
@@ -2108,7 +2100,7 @@ function explosion(pos, radius) {
   m.position.copy(pos);
   addTemp(m, 340, t => { m.scale.setScalar(0.12 + radius * 0.75 * (1 - Math.pow(1 - t, 2))); mat.opacity = 0.9 * (1 - t); });
   ringBurst(pos, 0xffb060, radius, 420);
-  debris(pos.x, pos.z, MAT.stoneDark, 5, 0.9);
+  debris(pos.x, pos.z, MAT.stoneDark, 3, 0.9);
 }
 function debris(x, z, material, n, power) {
   for (let i = 0; i < n; i++) {
@@ -2131,7 +2123,7 @@ function spawnFx(f) {
   if (k === 4) {
     const x = f[1] / 10, z = f[2] / 10, ty = f[3], killer = f[4] - 1;
     if (!ENEMIES[ty]) return;
-    debris(x, z, ENEMY_MAT()[ty], ty === 3 ? 14 : 8, ty === 3 ? 1.6 : 1);
+    debris(x, z, ENEMY_MAT()[ty], ty === 3 ? 12 : 5, ty === 3 ? 1.6 : 1);
     ringBurst(new THREE.Vector3(x, 0, z), ty === 3 ? 0xff5030 : 0x9b6dff, ty === 3 ? 1.3 : 0.6, 450);
     if (killer >= 0 && killer === mySeatCache) floats.push({ x, z, text: "+" + ENEMIES[ty].gold, start: now });
     return;
@@ -2224,6 +2216,7 @@ function render3D(v, now) {
   updateCursor(v, now);
   updateFx(now);
   animateDecor(now);
+  if (shadowDirty) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; }
   renderer.render(scene, camera);
   drawOverlay(v, now);
 }
@@ -2235,6 +2228,7 @@ function initThree() {
   } catch (_) { renderer = null; return false; }
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.12;
@@ -2267,6 +2261,7 @@ function portrait(kind, ty, lv, seat) {
     }
     const model = kind === "t" ? towerModel(ty, lv, seat >= 0 ? MAT.seat[seat] : MAT.neutral) : enemyModel(ty);
     if (model.userData.frost) model.userData.frost.visible = false;
+    if (model.userData.blob) model.userData.blob.visible = false;
     model.rotation.y = kind === "t" ? -0.55 : 0.75;
     const holder = new THREE.Group(); holder.add(model); pr.s.add(holder);
     model.updateMatrixWorld(true);
@@ -2462,11 +2457,17 @@ function renderTableList() {
 function updateJoinCard() {
   const btn = $("joinBtn"), st = $("joinStatus");
   renderTableList();
+  $("soloBtn").hidden = !(netFailed && !soloMode && !switching);
+  if (netFailed && !soloMode && !switching) {
+    btn.disabled = false; btn.textContent = "Спробувати ще раз";
+    st.textContent = "Не вдалося підключитися до сервера гри. Перевірте інтернет і спробуйте ще раз або грайте соло.";
+    return;
+  }
   if (!roomReady) { btn.disabled = true; btn.textContent = "Підключення…"; st.textContent = switching ? "Переходимо до столу…" : "Шукаємо кімнату…"; return; }
   btn.disabled = false;
   if (soloMode) {
     btn.textContent = "Грати соло";
-    st.textContent = "Не вдалося підключитися до мережі гри. Можна грати соло або оновити сторінку, щоб спробувати ще раз.";
+    st.textContent = "Не вдалося підключитися до сервера гри. Перевірте інтернет і оновіть сторінку, або грайте соло.";
     return;
   }
   const live = joinedPeers(peerList).filter(p => !p.sameTab);
@@ -2478,6 +2479,7 @@ function updateJoinCard() {
 }
 $("joinForm").addEventListener("submit", e => { e.preventDefault(); doJoin(); });
 function doJoin() {
+  if (netFailed && !soloMode) { const n = netFailed; netFailed = null; enterTable(n); updateJoinCard(); return; }
   if (!roomReady) return;
   const n = cleanName(nick.value) || "Гравець";
   myName = n;
@@ -2517,6 +2519,17 @@ $("inviteCopy").addEventListener("click", () => {
   } catch (_) { toast("Натисніть Ctrl+C або ⌘C, щоб скопіювати"); }
 });
 $("inviteClose").addEventListener("click", () => { $("inviteOverlay").hidden = true; });
+function copyCode() {
+  if (soloMode || !tableName) return;
+  const code = tableName.slice(5).toUpperCase();
+  try {
+    const pr = navigator.clipboard && navigator.clipboard.writeText(code);
+    if (pr && pr.then) pr.then(() => toast(`Код столу ${code} скопійовано`), () => showInvite(inviteLink()));
+    else showInvite(inviteLink());
+  } catch (_) { showInvite(inviteLink()); }
+}
+$("codeBtn").addEventListener("click", copyCode);
+$("soloBtn").addEventListener("click", () => { netFailed = null; goSolo(null); });
 function goCode() {
   const raw = $("codeIn").value.trim().toLowerCase().replace(/^stil-/, "").replace(/[^a-z0-9]/g, "");
   const n = "stil-" + raw;
@@ -2545,7 +2558,10 @@ function updateUI(v, now) {
   const seatedCount = v ? v.seats.filter(Boolean).length : 0;
   const lost = !soloMode && roomReady && !connected && disconnectedSince && now - disconnectedSince > 2000;
   $("net").className = "net " + (soloMode ? "" : lost ? "warn" : roomReady ? "on" : "");
-  $("netText").textContent = !roomReady ? "Підключення…" : soloMode ? "Соло" : lost ? "Відновлюємо зв’язок…" : `Стіл ${tableName ? tableName.slice(5).toUpperCase() : "—"} · ${seatedCount} з ${MAX_SEATS}`;
+  $("netText").textContent = !roomReady ? "Підключення…" : soloMode ? "Соло" : lost ? "Відновлюємо зв’язок…" : isNarrow() ? `${seatedCount}/${MAX_SEATS}` : `Онлайн · ${seatedCount} з ${MAX_SEATS} · стіл`;
+  const showCode = !soloMode && roomReady && !!tableName;
+  $("codeBtn").hidden = !showCode;
+  if (showCode) $("codeTxt").textContent = tableName.slice(5).toUpperCase();
 
   // banner
   let main = v ? `Хвиля ${v.w}` : "Хвиля 0", sub = joined ? "Готуємо стіл…" : "Сідайте за стіл, щоб грати";
@@ -2727,9 +2743,10 @@ function updateUI(v, now) {
 }
 
 /* ===================== MAIN LOOP ===================== */
-let lastUi = 0, lastFitCheck = 0;
+let lastUi = 0, lastFitCheck = 0, lastLoopTime = performance.now();
 function frame(now) {
   const v = getView(now);
+  trackPerf(now, now - lastLoopTime); lastLoopTime = now;
   if (renderer) {
     if (!isHost) {
       const rt = v ? v.rt : 0, rest = [];
@@ -2746,13 +2763,14 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+initNet();
 const ok3d = initThree();
 if (!ok3d) $("fallback").hidden = false;
 new ResizeObserver(resizeAll).observe(stage);
 resizeAll();
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { uiDirty = true; lastPartyKey = ""; setTimeout(fitCamera, 50); });
 requestAnimationFrame(frame);
-initNet();
+
 </script>
 </body>
 </html>
