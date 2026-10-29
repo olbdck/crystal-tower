@@ -24,11 +24,9 @@ export const S = {
 
   // game state
   isHost: false, // this tab runs the simulation
-  sim: null, // the Sim while hosting
-  cur: null, // { peer, e, t } of the state we follow
-  lastState: null, // last full state (for taking over as host)
-  latest: null, // { t, dec, at } decoded state for rendering
-  lastStateAt: 0,
+  sim: null, // our copy of the game: the authoritative one while hosting, else replayed from the host's stream
+  cur: null, // { peer, e }: who hosts the game we follow, and its epoch
+  lastStateAt: 0, // when the host's stream last arrived
   rttMs: null, // round trip of our own actions
   queue: [], // our actions not yet confirmed by the host
 

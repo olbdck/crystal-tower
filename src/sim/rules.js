@@ -31,7 +31,8 @@ export const ENEMIES = [
 export const PATHS = LANE_WP.map(lane => {
   const wp = lane.concat(SHARED_WP.slice(1)).map(([x, y]) => [x + 0.5, y + 0.5]);
   const cum = [0];
-  for (let i = 1; i < wp.length; i++) cum.push(cum[i - 1] + Math.hypot(wp[i][0] - wp[i - 1][0], wp[i][1] - wp[i - 1][1]));
+  // Math.sqrt is exact in every engine (Math.hypot is not), and every player must get the same lengths
+  for (let i = 1; i < wp.length; i++) { const dx = wp[i][0] - wp[i - 1][0], dy = wp[i][1] - wp[i - 1][1]; cum.push(cum[i - 1] + Math.sqrt(dx * dx + dy * dy)); }
   return { wp, cum, len: cum[cum.length - 1] };
 });
 
@@ -60,10 +61,13 @@ export const BLOCKED = new Uint8Array(COLS * ROWS);
   BLOCKED[CRYSTAL.y * COLS + CRYSTAL.x] = 2;
 })();
 
+// Plain multiplication instead of Math.pow: every browser must compute bit-identical numbers,
+// because each player runs the same simulation from the same inputs (see src/net/stream.js).
+const pow = (b, k) => { let r = 1; for (let i = 0; i < k; i++) r *= b; return r; };
 export function towerStats(ty, lv) {
   const d = TOWERS[ty], k = lv - 1;
   return {
-    dmg: d.dmg * Math.pow(1.6, k), rate: d.rate * Math.pow(0.88, k), range: d.range + 0.3 * k,
+    dmg: d.dmg * pow(1.6, k), rate: d.rate * pow(0.88, k), range: d.range + 0.3 * k,
     splash: d.splash || 0, slowDur: d.slowDur ? d.slowDur + 0.4 * k : 0,
     chain: d.chain ? d.chain + k : 0, chainRange: d.chainRange || 0,
   };

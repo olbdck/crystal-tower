@@ -78,6 +78,27 @@ test("a player who reloads gets their seat, gold and towers back", async ({ brow
   await a.context.close(); await b.context.close();
 });
 
+test("a host who reloads gets their seat back while the game goes on", async ({ browser }) => {
+  const a = await openGame(browser);
+  await sitDown(a.page, "Олег");
+  await waitView(a.page, v => v.host);
+  const hash = new URL(await a.page.evaluate(() => window.__kv.inviteLink())).hash;
+  const b = await openGame(browser, { path: "/" + hash });
+  await sitDown(b.page, "Марко");
+  await waitView(a.page, v => v.seats.filter(Boolean).length === 2);
+  await a.page.evaluate(() => window.__kv.act("b", 5 * 20 + 4, 0));
+  await waitView(b.page, v => v.towers.length === 1);
+
+  await a.page.reload();
+  await a.page.waitForFunction(() => window.__kv && window.__kv.S.joined === true, null, { timeout: 30_000 });
+  await waitView(b.page, v => v.host, null, 15_000);
+  await waitView(a.page, v => !v.host && v.mySeat === 0 && v.gold[0] === 110 && v.towers.length === 1);
+  await a.page.evaluate(() => window.__kv.act("b", 5 * 20 + 5, 0));
+  await waitView(b.page, v => v.towers.length === 2);
+  expect(a.errors).toEqual([]);
+  await a.context.close(); await b.context.close();
+});
+
 test("the next player takes over within a couple of seconds when the host closes the tab", async ({ browser }) => {
   const a = await openGame(browser);
   await sitDown(a.page, "Олег");
@@ -128,3 +149,34 @@ test("a host that freezes without closing is replaced too", async ({ browser }) 
   await waitView(a.page, v => !v.host && v.mySeat === 0);
   await a.context.close(); await b.context.close();
 });
+
+for (const p2p of [true, false]) {
+  test(`everyone plays the same wave ${p2p ? "over direct links" : "through the broker alone"}`, async ({ browser }) => {
+    const a = await openGame(browser, { p2p });
+    await sitDown(a.page, "Олег");
+    await waitView(a.page, v => v.host);
+    const hash = new URL(await a.page.evaluate(() => window.__kv.inviteLink())).hash;
+    const b = await openGame(browser, { path: "/" + hash, p2p });
+    await sitDown(b.page, "Марко");
+    await waitView(a.page, v => v.seats.filter(Boolean).length === 2);
+    const kind = p2p ? "direct" : "server";
+    await b.page.waitForFunction(k => Object.values(window.__kv.S.room.links()).some(l => l.kind === k), kind, { timeout: 30_000 });
+    for (const [page, cells] of [[a.page, [104, 105, 106]], [b.page, [124, 125, 126]]]) {
+      await page.evaluate(cs => { for (const c of cs) window.__kv.act("b", c, 0); window.__kv.act("r", 1); }, cells);
+    }
+    await waitView(b.page, v => v.w === 1 && v.ph === 2 && v.towers.length === 6);
+    await b.page.waitForTimeout(4000);
+    // B replays A's game from the stream: the checksums along the way all matched
+    const d = await b.page.evaluate(() => window.__kv.hostDebug());
+    expect(d.follow.hashChecks).toBeGreaterThan(3);
+    expect(d.follow.resyncs).toBe(0);
+    const [va, vb] = [await view(a.page), await view(b.page)];
+    expect(vb.towers).toEqual(va.towers);
+    const host = await a.page.evaluate(() => window.__kv.hostDebug());
+    // the stream is small: a few hundred bytes per second
+    expect(host.net.out / ((host.now - host.hostSince) / 1000)).toBeLessThan(p2p ? 2000 : 6000);
+    expect(a.errors).toEqual([]);
+    expect(b.errors).toEqual([]);
+    await a.context.close(); await b.context.close();
+  });
+}

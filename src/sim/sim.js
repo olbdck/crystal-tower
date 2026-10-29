@@ -1,11 +1,18 @@
-// Authoritative game simulation. Only the host runs it; everyone else shows the state it publishes.
+// The game simulation. The host runs it and decides; every other player runs an identical copy fed
+// with the same inputs (who sits at the table, each player's actions, the passing ticks), so all copies
+// stay bit-for-bit equal without sending positions around. Keep it deterministic: no clocks, no
+// Math.random, no engine-dependent maths, and iterate Maps and arrays in insertion order.
 import {
   BLOCKED, BREAK_TIME, COLS, ENEMIES, GIFT, MAX_ENEMIES, MAX_SEATS, MAX_TOWERS, MAX_WAVES, PATHS, ROWS, SEAT_GRACE, NO_OWNER, SLOW_FACTOR, START_GOLD, START_LIVES, SYN_BONUS, TOWERS, enemyTypeAt, hpScale, posAt, sellValue, spawnInterval, synergyAt, towerStats, upgradeCost, waveTotal,
 } from "./rules.js";
 
+const F64 = new Float64Array(1), W32 = new Uint32Array(F64.buffer);
+// FNV-1a over the exact bits of a number
+function mix(h, x) { F64[0] = x; h = Math.imul(h ^ W32[0], 16777619); return Math.imul(h ^ W32[1], 16777619); }
+
 export class Sim {
   constructor() {
-    this.e = 1; this.t = 0; this.ak = new Map(); this.gone = new Map(); this.onFx = null; this.fxOut = [];
+    this.e = 1; this.t = 0; this.ak = new Map(); this.gone = new Map(); this.onFx = null; this.roster = [];
     this.reset(["", "", "", "", ""]);
   }
   reset(seats) {
@@ -17,6 +24,14 @@ export class Sim {
     this.ready = [false, false, false, false, false];
     for (let i = 0; i < MAX_SEATS; i++) if (this.seats[i]) this.u |= 1 << i;
     this.towers = new Map(); this.enemies = []; this.nid = 1; this.syn = new Map(); this.tv = (this.tv || 0) + 1;
+  }
+  /** Players sitting at the table right now, in joining order. Changes come from the host as inputs. */
+  setRoster(labels) { this.roster = labels.slice(); this.assignSeats(this.roster); }
+  /** One player's action, with acknowledgement; ignored (but acknowledged) for players without a seat. */
+  applyFrom(label, it) {
+    const seat = this.seats.indexOf(label);
+    if (seat >= 0) this.apply(seat, it);
+    this.ak.set(label, it[0]);
   }
   occupied() { const r = []; for (let i = 0; i < MAX_SEATS; i++) if (this.seats[i]) r.push(i); return r; }
   /**
@@ -93,6 +108,8 @@ export class Sim {
   }
   step(dt) {
     this.t++;
+    // a seat held for a player who dropped out is released when the wait runs out
+    if (this.gone.size && this.t % 30 === 0) this.assignSeats(this.roster);
     if (this.ph === 1) {
       const occ = this.present();
       if (occ.length && occ.every(i => this.ready[i])) this.startWave();
@@ -200,55 +217,22 @@ export class Sim {
       }
     }
   }
+  /** An effect for the renderer: [kind, x*10, z*10, x*10|type, z*10|killer+1]. Never affects the game. */
   fx(kind, a, b, c, d) {
-    const f = [kind, Math.round(a * 10), Math.round(b * 10), kind === 4 ? c : Math.round(c * 10), kind === 4 ? d : Math.round(d * 10)];
-    this.fxOut.push(f);
-    if (this.fxOut.length > 40) this.fxOut.shift();
-    if (this.onFx) this.onFx(f);
+    if (!this.onFx) return;
+    this.onFx([kind, Math.round(a * 10), Math.round(b * 10), kind === 4 ? c : Math.round(c * 10), kind === 4 ? d : Math.round(d * 10)]);
   }
-  serialize() {
-    const T = [], E = [], F = [], ak = [];
-    for (const tw of this.towers.values()) T.push(tw.c, tw.ty, tw.lv, tw.o);
-    for (const e of this.enemies) E.push(e.id, e.ty, e.ln, Math.round(e.d * 100), Math.max(1, Math.ceil(e.hp)), Math.round(e.sl * 10));
-    for (const f of this.fxOut) F.push(f[0], f[1], f[2], f[3], f[4]);
-    this.fxOut = [];
-    for (const [k, v] of this.ak) ak.push(k, v);
-    let r = 0;
-    this.ready.forEach((x, i) => { if (x) r |= 1 << i; });
-    return {
-      v: 1, e: this.e, t: this.t, ph: this.ph, w: this.w, l: this.l, tm: Math.round(this.tm * 10), sp: this.sp,
-      sc: Math.round(this.sc * 100), pc: this.pc, hs: Math.round(this.hs * 1000), bk: Math.round(this.bk), u: this.u,
-      st: this.seats.slice(), g: this.gold.map(x => Math.floor(x)), k: this.kills.slice(), r, T, E, F, ak, n: this.nid,
-    };
-  }
-  static fromSnapshot(s) {
-    const m = new Sim();
-    const num = (x, d) => (typeof x === "number" && Number.isFinite(x) ? x : d);
-    m.e = num(s.e, 1); m.t = num(s.t, 0);
-    m.ph = [1, 2, 3, 4].includes(s.ph) ? s.ph : 1;
-    m.w = Math.max(0, Math.min(MAX_WAVES, num(s.w, 0) | 0));
-    m.l = num(s.l, START_LIVES); m.tm = num(s.tm, -10) / 10; m.sp = num(s.sp, 0); m.sc = num(s.sc, 0) / 100;
-    m.pc = Math.max(1, Math.min(MAX_SEATS, num(s.pc, 1) | 0)); m.hs = num(s.hs, 1000) / 1000;
-    m.bk = num(s.bk, START_GOLD); m.u = num(s.u, 0) | 0; m.nid = num(s.n, 1);
+  /** A checksum of the whole game state. Copies compare it with the host's to catch any divergence. */
+  stateHash() {
+    let h = 2166136261 | 0;
+    for (const x of [this.t, this.ph, this.w, this.l, this.tm, this.sp, this.sc, this.pc, this.hs, this.bk, this.u, this.nid]) h = mix(h, x);
     for (let i = 0; i < MAX_SEATS; i++) {
-      m.seats[i] = Array.isArray(s.st) && typeof s.st[i] === "string" ? s.st[i] : "";
-      m.gold[i] = Array.isArray(s.g) ? num(s.g[i], START_GOLD) : START_GOLD;
-      m.kills[i] = Array.isArray(s.k) ? num(s.k[i], 0) : 0;
-      m.ready[i] = !!(num(s.r, 0) & (1 << i));
+      h = mix(h, this.gold[i]); h = mix(h, this.kills[i]); h = mix(h, this.ready[i] ? 1 : 0);
+      const st = this.seats[i];
+      for (let k = 0; k < st.length; k++) h = Math.imul(h ^ st.charCodeAt(k), 16777619);
     }
-    if (Array.isArray(s.T)) for (let i = 0; i + 3 < s.T.length; i += 4) {
-      const c = s.T[i], ty = s.T[i + 1], lv = s.T[i + 2], o = s.T[i + 3];
-      if (!Number.isInteger(c) || c < 0 || c >= COLS * ROWS || BLOCKED[c] || !TOWERS[ty] || !(lv >= 1 && lv <= 3) || !(o === NO_OWNER || (o >= 0 && o < MAX_SEATS))) continue;
-      m.towers.set(c, { c, ty, lv, o, cd: 0 });
-    }
-    if (Array.isArray(s.E)) for (let i = 0; i + 5 < s.E.length; i += 6) {
-      const ty = s.E[i + 1], ln = s.E[i + 2];
-      if (!ENEMIES[ty] || !PATHS[ln]) continue;
-      const d = num(s.E[i + 3], 0) / 100, p = posAt(ln, d);
-      m.enemies.push({ id: s.E[i], ty, ln, d, pd: d, hp: num(s.E[i + 4], 1), sl: num(s.E[i + 5], 0) / 10, x: p[0], y: p[1], dead: false, leak: false, killer: -1 });
-    }
-    if (Array.isArray(s.ak)) for (let i = 0; i + 1 < s.ak.length; i += 2) if (typeof s.ak[i] === "string" && Number.isFinite(s.ak[i + 1])) m.ak.set(s.ak[i], s.ak[i + 1]);
-    m.recomputeSyn();
-    return m;
+    for (const tw of this.towers.values()) { h = mix(h, tw.c); h = mix(h, tw.ty * 4 + tw.lv); h = mix(h, tw.o); h = mix(h, tw.cd); }
+    for (const e of this.enemies) { h = mix(h, e.id); h = mix(h, e.d); h = mix(h, e.hp); h = mix(h, e.sl); }
+    return h >>> 0;
   }
 }

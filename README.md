@@ -30,21 +30,32 @@ A tower deals +15% damage for every *other* player whose tower stands on one of 
 
 - The game is plain JavaScript modules bundled with Vite; Three.js and MQTT.js come from npm.
 - Players talk directly browser-to-browser over WebRTC data channels (a full mesh, at most 5 players). Typical round trips are tens of milliseconds instead of seconds through a relay.
-- To find each other, players use a public MQTT broker over a secure WebSocket (WSS). The broker carries the connection offers (signaling), keeps a copy of each player's state for whoever joins next, and acts as a slow fallback if a direct channel cannot be made.
+- To find each other, players use a public MQTT broker over a secure WebSocket (WSS). The broker carries the connection offers (signaling), keeps each player's presence and the latest game keyframe for whoever joins next, and acts as a fallback if a direct channel cannot be made.
 - NAT traversal: Google STUN servers find each player's public address. When a strict NAT (mobile data, some home routers) blocks a direct path, traffic goes through a TURN relay. By default the free shared [Open Relay](https://www.metered.ca/tools/openrelay/) TURN is used.
-- The party list shows how each player is reached: `пряме` (direct), `TURN` (relayed), or `через сервер` (broker fallback, slow), with the measured round trip.
+- The party list shows how each player is reached: `пряме` (direct), `TURN` (relayed), or `через сервер` (broker fallback), with the measured round trip.
 - The first letter of the table code tells which broker the table uses (`e` = EMQX, `h` = HiveMQ, `m` = Mosquitto). A new table goes to whichever broker answers first.
-- One player's browser (the host) runs the simulation and sends a snapshot about 10 times a second. The host keeps the job even when its tab is in the background, because the simulation ticks from a Web Worker. If the host leaves or its updates stop for 3.5 seconds, the next player takes over (visible tabs and desktops are preferred over phones) and the game continues.
-- Between snapshots every client moves enemies forward on its own (they walk fixed paths at known speeds), and small corrections are blended in, so movement stays smooth even when the network is uneven.
-- Actions such as building are applied by the host as soon as they arrive and confirmed in the next snapshot. The top-left plaque shows this round trip in milliseconds.
-- A player who drops out briefly or reloads the tab keeps their seat and gold for 10 seconds.
+
+### One simulation, played everywhere
+
+- One player's browser (the host) runs the simulation and decides. Instead of sending the state of the board, it sends the simulation's *inputs*: ticks, who sits at the table, and each action it applied. Every other browser replays them on its own copy of the simulation, which is deterministic, so all copies stay bit-for-bit identical. Shots, explosions and kills are computed locally too.
+- The inputs travel in small binary batches about 30 times a second: a few hundred bytes per second per player, against 9 KB/s on average (up to 26 KB/s in late waves) for the JSON snapshots used before. Check with `npm run netstats`.
+- A keyframe (the full state, 1-3 KB) starts a copy: when a player joins, after a lost batch, and when the host changes. Every second the stream also carries a checksum of the host's state; a copy that differs asks for a keyframe and continues from it.
+- Each copy plays the batches back at real-time pace a couple of ticks behind the newest one, so enemies move smoothly even when packets arrive unevenly. The buffer grows after a hiccup and shrinks again on a steady connection.
+- Actions such as building are applied by the host as soon as they arrive, and the stream carries the confirmation. The top-left plaque shows this round trip in milliseconds.
+
+### When something goes wrong
+
+- The host keeps the job even when its tab is in the background, because the simulation ticks from a Web Worker.
+- If the host's tab closes, the next player takes over in about a second; if the host freezes or its stream stops, within 2-3.5 seconds. Visible tabs and desktops are preferred over phones. The new host continues from its own copy, so nothing is lost.
+- A player who drops out or reloads keeps their seat, gold and towers for 3 minutes. Within 10 minutes the page sits them back down by itself. After 3 minutes the seat is freed; their towers stay on the board without an owner.
+- Everyone at a table must run the same version of the game. A player with an older or newer page cannot sit down and is told whose page needs a refresh.
 - When everyone leaves a table, it disappears.
 
 Note: public brokers are open, so anyone who knows a table code could read that table's game messages. The game sends nothing beyond player names and game state.
 
 ## Network settings
 
-At the top of the `NETWORK TRANSPORT` block in `index.html` there is a `NET_CONFIG` setting.
+Network settings live in `NET_CONFIG` in `src/config.js`.
 
 For more reliable relaying, add your own TURN server, for example the free tier of [ExpressTURN](https://www.expressturn.com/) (1000 GB/month) or a [Metered](https://www.metered.ca/tools/openrelay/) app key, which returns the TURN servers nearest to each player:
 
@@ -74,6 +85,7 @@ npm run dev            # game at http://localhost:5173 with live reload
 npm run dev:broker     # optional: local MQTT broker, then open http://localhost:5173/?broker=ws://127.0.0.1:8888
 npm test               # unit tests, build, end-to-end multiplayer tests
 npm run balance        # bot teams of 1-5 players play full games and report how far they got
+npm run netstats       # how many bytes per second the game stream sends during a game
 ```
 
 Code layout:
@@ -81,14 +93,16 @@ Code layout:
 | Path | What it holds |
 |---|---|
 | `src/sim/` | Game rules and the simulation. Pure JavaScript, no DOM, tested in Node. |
-| `src/net/` | Network transport (WebRTC + MQTT), the session (tables, host, actions) and the view the UI draws. |
+| `src/net/` | Network transport (WebRTC + MQTT), the session (tables, host, actions), the binary game stream (`codec.js`, `stream.js`) and the view the UI draws. |
 | `src/render/` | Three.js scene, models, effects, 2D overlay and card portraits. |
 | `src/ui/` | HUD, input, join screen and dialogs. |
 | `src/main.js` | Boot and the frame loop. |
-| `tests/unit/` | `node --test` tests for rules, simulation and balance. |
+| `tests/unit/` | `node --test` tests for rules, simulation, the game stream and balance. |
 | `tests/e2e/` | Playwright tests: several browser tabs play together through a local broker. |
 
 GitHub Actions runs all tests on every push and pull request, and deploys `main` to GitHub Pages
 (Settings → Pages → Source: **GitHub Actions**).
 
 The sources also run without a build from any static server (`python3 -m http.server`), using the import map in `index.html`.
+
+`CLAUDE.md` describes the architecture and the rules to keep when changing the code.

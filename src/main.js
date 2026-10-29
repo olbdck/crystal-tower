@@ -2,7 +2,7 @@
 import { TEST } from "./config.js";
 import * as R from "./sim/rules.js";
 import { S } from "./state.js";
-import { initNet, fxPending, setHostFxHandler, act, inviteLink, hostDebug, joinedPeers } from "./net/session.js";
+import { initNet, pump, setFxHandler, act, inviteLink, hostDebug, joinedPeers } from "./net/session.js";
 import { getView } from "./net/view.js";
 import { SEAT_CSS } from "./render/gfx.js";
 import { initThree, render3D, renderer, resizeAll, fitCamera, measureSafe, lastSafe, trackPerf, stage } from "./render/scene.js";
@@ -16,15 +16,9 @@ import { initModals } from "./ui/modals.js";
 let lastUi = 0, lastFitCheck = 0, lastLoopTime = performance.now();
 
 function frame(now) {
+  pump(now); // replay the host's stream up to this frame
   const v = getView(now);
   trackPerf(now, now - lastLoopTime); lastLoopTime = now;
-  if (!S.isHost && fxPending.length) {
-    // effects from snapshots play once the view reaches their tick
-    const rt = v ? v.rt : 0;
-    let keep = 0;
-    for (const p of fxPending) { if (p.at <= rt) { if (renderer) spawnFx(p.f); } else fxPending[keep++] = p; }
-    fxPending.length = keep;
-  }
   if (renderer) render3D(v, now);
   if (S.uiDirty || now - lastUi > 150) { updateUI(v, now); lastUi = now; S.uiDirty = false; }
   if (renderer && now - lastFitCheck > 600) {
@@ -39,7 +33,7 @@ function boot() {
   initModals();
   initJoin();
   initInput();
-  setHostFxHandler(f => { if (renderer) spawnFx(f); });
+  setFxHandler(f => { if (renderer && !document.hidden) spawnFx(f); });
   initNet();
   if (!TEST.noRender && !initThree()) $("fallback").hidden = false;
   new ResizeObserver(resizeAll).observe(stage);

@@ -1,12 +1,12 @@
 // Helpers for multiplayer tests: every page talks to the local broker and skips 3D unless asked.
 export const BROKER = "ws://127.0.0.1:8888";
 
-export async function openGame(browser, { path = "/", render = false, build = null } = {}) {
+export async function openGame(browser, { path = "/", render = false, build = null, p2p = true } = {}) {
   const context = await browser.newContext();
-  await context.addInitScript(([broker, render, build]) => {
+  await context.addInitScript(([broker, render, build, p2p]) => {
     window.KV_TEST = { noRender: !render, ...(build ? { build } : {}) };
-    window.KV_NET_CONFIG = { brokers: [{ id: "e", url: broker }, { id: "h", url: broker }], stun: [], openRelay: null };
-  }, [BROKER, render, build]);
+    window.KV_NET_CONFIG = { brokers: [{ id: "e", url: broker }, { id: "h", url: broker }], stun: [], openRelay: null, p2p };
+  }, [BROKER, render, build, p2p]);
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", e => errors.push(String(e)));

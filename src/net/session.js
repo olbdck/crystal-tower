@@ -1,33 +1,49 @@
-// Session: which table we are at, who hosts the game, and how state and actions flow.
+// Session: which table we are at, who hosts the game, and how the game reaches everyone.
 //
-// One player's tab (the host) runs the Sim and publishes snapshots about 10 times a second through
-// its presence. Everyone sends their actions (build, upgrade, ready...) in their own presence; the host
-// applies them and acknowledges them in the next snapshot. If the host leaves or goes silent, the next
-// player takes over from the last snapshot.
+// One player's tab (the host) runs the Sim and decides. It streams the simulation's inputs (ticks,
+// who sits where, each action it applied) to the others in small binary batches about 30 times a
+// second; every other tab replays them on its own copy of the Sim and gets the same game, effects
+// included. A keyframe (the full state) starts a copy: on joining, after a gap, and when the host
+// changes. Players send their actions in their presence; the host applies them and the stream
+// carries the acknowledgement. If the host leaves or goes silent, the next player takes over from
+// its own copy. See src/net/codec.js for the messages and src/net/stream.js for the replay.
 import { Sim } from "../sim/sim.js";
-import { STEP, TOWERS, ENEMIES, PATHS, synergyAt } from "../sim/rules.js";
+import { STEP } from "../sim/rules.js";
 import { NET_CONFIG, BUILD } from "../config.js";
 import { makeLobby, generatedHere } from "./transport.js";
-import { predictEnemies, corr, corrOffset } from "./view.js";
+import { MSG_BATCH, MSG_KEYFRAME, MSG_REQ, decodeBatch, decodeKeyframe, peek, unbundle } from "./codec.js";
+import { Follower, Recorder } from "./stream.js";
 import { S } from "../state.js";
 import { toast } from "../ui/dom.js";
 import { updateJoinCard, showJoin, tryRejoin } from "../ui/join.js";
 
 export const STEP_MS = STEP * 1000;
-const PRESENCE_BUDGET = 3800, PUBLISH_MS = 100;
-// Take over when the host's state stops for this long; much sooner once its direct channel closed.
+// Take over when the host's stream stops for this long; much sooner once its direct channel closed.
 const HOST_STALE_MS = 3500, HOST_STALE_DIRECT_MS = 2000, HOST_GONE_MS = 1200;
+const KF_RETAIN_MS = 5000; // how often the host refreshes the keyframe kept on the broker
+const KF_REQUEST_MS = 600; // at most one keyframe request per this long
 const TERMINAL = new Set(["revoked", "not_granted", "capability_disabled", "capability_removed", "transform_error"]);
 const isCoarse = (() => { try { return matchMedia("(pointer: coarse)").matches; } catch (_) { return false; } })();
 
-let hostTimer = null, tickWorker = null, hostAcc = 0, lastHostTime = 0, lastPublish = 0, hostLinkLostAt = -1e9;
+let ticker = null, hostAcc = 0, lastHostTime = 0, hostLinkLostAt = -1e9, hostSince = 0;
 let seq = Math.floor(Date.now() / 10) % 1e11;
-const sentAt = new Map(), seenS = new Map(), lastTBy = new Map();
-export const fxPending = []; // effects from snapshots, played when the view reaches their tick
+const sentAt = new Map();
 export const lobbyTables = new Map();
 
-/** Host's progress into the current tick, 0..1, for smooth rendering between ticks. */
-export function hostAlpha() { return Math.min(1, hostAcc / STEP_MS); }
+const follower = new Follower(); // replays the host's game while we do not host
+let rec = null; // records every change to our Sim while we host
+let lastRetain = 0, lastKfRequest = -1e9, lastAck = null;
+const kfSentTo = new Map(); // label -> when we last sent them a keyframe on request
+const heldKf = new Map(); // label -> { bytes, at }: keyframe from a player whose presence does not say "host" yet
+const announcedAt = new Map(); // "label:epoch" -> when we first saw a player announce hosting that game
+/** Stream traffic, for tests and the curious: bytes and messages in and out. */
+export const netStats = { in: 0, out: 0, inMsgs: 0, outMsgs: 0 };
+
+/** Progress into the current tick, 0..1, for smooth rendering between ticks. */
+export function viewAlpha(now) {
+  if (S.isHost) return Math.min(1, (hostAcc + Math.max(0, now - lastHostTime)) / STEP_MS);
+  return follower.alpha(now);
+}
 
 /* ---------- presence ---------- */
 export function joinPresence() {
@@ -56,6 +72,7 @@ function makeSoloRoom() {
     },
     onPeers(h) { handlers.add(h); queueMicrotask(() => h({ peers: list, joined: list, left: [], updated: [] })); return () => handlers.delete(h); },
     connected: () => true,
+    stream: { on: () => () => {}, send() {}, sendTo() {}, retain() {}, request() {} },
   };
 }
 
@@ -65,6 +82,8 @@ const sat = p => p.kind === "viewer" && p.presence && typeof p.presence.j === "n
 export const sameBuild = p => p.sameTab || (p.presence && p.presence.v === BUILD.id);
 /** Players who sat down at the table on our build, in joining order. */
 export function joinedPeers(list) { return list.filter(p => sat(p) && sameBuild(p)).sort(byJ); }
+/** The game a player says it hosts (epoch), or null. */
+const hostsEpoch = p => (p && p.presence && Number.isInteger(p.presence.H) ? p.presence.H : null);
 
 /* ---------- version check ---------- */
 // The table runs the build of its host, or of whoever sat down first when nobody hosts yet.
@@ -75,7 +94,7 @@ function updateVersionCheck() {
   if (!S.isHost) {
     const host = S.cur && others.find(p => p.peer === S.cur.peer);
     const ref = host || (S.joined ? null : others.slice().sort(byJ)[0]);
-    if (ref && !sameBuild(ref) && !others.some(p => sameBuild(p) && p.presence.s)) {
+    if (ref && !sameBuild(ref) && !others.some(p => sameBuild(p) && hostsEpoch(p) !== null)) {
       block = { newer: (BUILD.t || 0) > (ref.presence.vt || 0), name: cleanName(ref.presence.n) || "Гравець" };
     }
   }
@@ -93,7 +112,7 @@ const warnedBuild = new Set();
 
 export function cleanName(n) {
   if (typeof n !== "string") return "";
-  return n.replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁯﻿]/g, "").trim().slice(0, 16);
+  return n.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, "").trim().slice(0, 16);
 }
 const knownNames = new Map(); // remembers names of players who dropped out, for the party list
 export function nameOfPeer(peer) {
@@ -102,79 +121,104 @@ export function nameOfPeer(peer) {
   return (p && cleanName(p.presence && p.presence.n)) || knownNames.get(peer) || "Гравець";
 }
 
-/* ---------- snapshots ---------- */
-function validState(s) {
-  return s && typeof s === "object" && s.v === 1 && Number.isFinite(s.e) && Number.isFinite(s.t) &&
-    Array.isArray(s.T) && Array.isArray(s.E) && Array.isArray(s.st) && Array.isArray(s.g);
-}
-function better(peer, s) {
+/* ---------- the game stream (receiving) ---------- */
+// Which of two hosted games wins: the newer epoch, then the smaller player id. Everyone picks the same.
+function betterStream(peer, e) {
   if (!S.cur) return true;
-  if (s.e !== S.cur.e) return s.e > S.cur.e;
-  if (peer === S.cur.peer) return s.t > S.cur.t;
+  if (e !== S.cur.e) return e > S.cur.e;
   return peer < S.cur.peer;
 }
 
-export function decodeState(s) {
-  const towers = [], tmap = new Map(), enemies = [], emap = new Map();
-  for (let i = 0; i + 3 < s.T.length; i += 4) {
-    const tw = { c: s.T[i], ty: s.T[i + 1], lv: s.T[i + 2], o: s.T[i + 3] };
-    if (!TOWERS[tw.ty] || !Number.isInteger(tw.c)) continue;
-    towers.push(tw); tmap.set(tw.c, tw);
-  }
-  const hs = (Number.isFinite(s.hs) ? s.hs : 1000) / 1000;
-  for (let i = 0; i + 5 < s.E.length; i += 6) {
-    const e = { id: s.E[i], ty: s.E[i + 1], ln: s.E[i + 2], d: s.E[i + 3] / 100, hp: s.E[i + 4], sl: s.E[i + 5] / 10 };
-    if (!ENEMIES[e.ty] || !PATHS[e.ln] || !Number.isFinite(e.d)) continue;
-    e.mhp = ENEMIES[e.ty].hp * hs;
-    enemies.push(e); emap.set(e.id, e);
-  }
-  const syn = new Map();
-  for (const tw of towers) syn.set(tw.c, synergyAt(tmap, tw));
-  const ready = [0, 1, 2, 3, 4].map(i => !!((s.r | 0) & (1 << i)));
-  return {
-    ph: s.ph, w: s.w | 0, l: s.l, tm: (s.tm || 0) / 10, sp: s.sp | 0, pc: Math.max(1, s.pc | 0), hs,
-    seats: [0, 1, 2, 3, 4].map(i => (typeof s.st[i] === "string" ? s.st[i] : "")),
-    gold: [0, 1, 2, 3, 4].map(i => (Number.isFinite(s.g[i]) ? s.g[i] : 0)),
-    kills: [0, 1, 2, 3, 4].map(i => (Array.isArray(s.k) && Number.isFinite(s.k[i]) ? s.k[i] : 0)),
-    ready, towers, tmap, enemies, emap, syn, t: s.t,
-  };
+function requestKeyframe(label, now) {
+  if (!S.room || !S.room.stream || now - lastKfRequest < KF_REQUEST_MS) return;
+  lastKfRequest = now;
+  S.room.stream.request(label);
 }
 
-function acceptState(peer, s) {
-  const isNewEpoch = !S.cur || S.cur.e !== s.e, hostChanged = !!S.cur && S.cur.peer !== peer;
-  const now = performance.now();
-  const before = S.latest ? predictEnemies(S.latest, now) : null;
-  S.cur = { peer, e: s.e, t: s.t };
-  S.lastState = s; S.lastStateAt = now;
-  S.latest = { t: s.t, dec: decodeState(s), at: now };
-  // what we were showing vs. what the new snapshot says: keep the difference and let it fade, so nothing jumps
-  if (before) {
-    for (const [id, pnew] of predictEnemies(S.latest, now)) {
-      const pold = before.get(id);
-      if (pold && pold.ln === pnew.ln) {
-        const off = pold.d + (corr.has(id) ? corrOffset(id, now) : 0) - pnew.d;
-        if (Math.abs(off) < 1.5) corr.set(id, { off, at: now }); else corr.delete(id);
-      }
-    }
-    if (corr.size > 150) for (const [id, c] of corr) if (now - c.at > 1000) corr.delete(id);
-  }
-  if (hostChanged && S.joined) toast(`Гру тепер веде ${nameOfPeer(peer)}`);
-  if (Array.isArray(s.F)) for (let i = 0; i + 4 < s.F.length; i += 5) fxPending.push({ at: s.t, f: s.F.slice(i, i + 5) });
-  if (fxPending.length > 120) fxPending.splice(0, fxPending.length - 120);
-  handleAck(s.ak);
-  if (isNewEpoch) S.uiDirty = true;
+function onStream(label, bytes) {
+  if (!S.room || label === S.myPeer) return;
+  netStats.in += bytes.length; netStats.inMsgs++;
+  let list;
+  try { list = unbundle(bytes); } catch (_) { return; }
+  for (const m of list) onStreamMessage(label, m, performance.now());
 }
 
-function handleAck(ak) {
-  if (!Array.isArray(ak) || !S.myPeer) return;
-  let x = null;
-  for (let i = 0; i + 1 < ak.length; i += 2) if (ak[i] === S.myPeer) { x = ak[i + 1]; break; }
-  if (x == null) return;
+function onStreamMessage(label, m, now) {
+  let h;
+  try { h = peek(m); } catch (_) { return; }
+  if (h.type === MSG_REQ) { if (S.isHost) sendKeyframeTo(label, now); return; }
+  const peer = S.peerList.find(p => p.peer === label);
+  // only a player whose presence says it hosts this very game is listened to; this also skips
+  // keyframes left on the broker by a host that is gone
+  const hosting = !!peer && sat(peer) && sameBuild(peer) && hostsEpoch(peer) === h.e;
+  if (h.type === MSG_KEYFRAME) {
+    // its presence may still be on the way: keep the keyframe a few seconds
+    if (!hosting) { if (!peer || sameBuild(peer)) heldKf.set(label, { bytes: m, e: h.e, at: (heldKf.get(label) || { at: now }).at }); return; }
+    if (S.cur && S.cur.peer === label && S.cur.e === h.e && !follower.needsKeyframe) { S.lastStateAt = now; return; } // in step already
+    let kf;
+    try { kf = decodeKeyframe(m); } catch (_) { return; }
+    if (kf.build === BUILD.id) takeKeyframe(label, kf, now);
+  } else if (h.type === MSG_BATCH) {
+    if (S.cur && label === S.cur.peer && h.e === S.cur.e) {
+      S.lastStateAt = now;
+      let b;
+      try { b = decodeBatch(m); } catch (_) { return; }
+      follower.push(b, now);
+      if (follower.needsKeyframe) requestKeyframe(label, now);
+    } else if (hosting && betterStream(label, h.e)) requestKeyframe(label, now);
+  }
+}
+
+function takeKeyframe(label, kf, now) {
+  const same = !!S.cur && S.cur.peer === label && S.cur.e === kf.e;
+  if (same) {
+    S.lastStateAt = now;
+    if (S.isHost || !follower.needsKeyframe || kf.seq + 1 < follower.next) return; // in step, or an older keyframe
+  } else if (!betterStream(label, kf.e)) return;
+  const hostChanged = !!S.cur && S.cur.peer !== label;
+  if (S.isHost) stepDown();
+  else if (S.myPres.H != null) setPresence({ H: null }); // we stopped hosting without noticing (a frozen tab)
+  S.cur = { peer: label, e: kf.e };
+  S.lastStateAt = now;
+  follower.load(kf, now, same);
+  S.sim = follower.sim;
+  heldKf.delete(label);
+  if (hostChanged && S.joined) toast(`Гру тепер веде ${nameOfPeer(label)}`);
+  S.uiDirty = true;
+}
+
+/** A player announced hosting a game we do not follow yet: ask for its keyframe. */
+function watchHosts(now) {
+  for (const [label, k] of [...heldKf]) {
+    const p = S.peerList.find(x => x.peer === label);
+    if (now - k.at > 5000) heldKf.delete(label);
+    else if (p && sat(p) && sameBuild(p) && hostsEpoch(p) === k.e) { heldKf.delete(label); onStreamMessage(label, k.bytes, now); }
+  }
+  const hosts = S.peerList.filter(p => !p.sameTab && hostsEpoch(p) !== null && sat(p) && sameBuild(p))
+    .sort((a, b) => hostsEpoch(b) - hostsEpoch(a) || (a.peer < b.peer ? -1 : 1));
+  const best = hosts[0];
+  if (!best) return;
+  const e = hostsEpoch(best);
+  if (betterStream(best.peer, e) || (S.cur && S.cur.peer === best.peer && S.cur.e === e && follower.needsKeyframe)) requestKeyframe(best.peer, now);
+}
+
+function handleAck(x) {
+  if (!Number.isFinite(x) || x === lastAck) return;
+  lastAck = x;
   const before = S.queue.length, now = performance.now();
   for (const q of S.queue) if (q[0] <= x && sentAt.has(q[0])) { const rtt = now - sentAt.get(q[0]); S.rttMs = S.rttMs === null ? rtt : S.rttMs * 0.7 + rtt * 0.3; }
   for (const k of [...sentAt.keys()]) if (k <= x) sentAt.delete(k);
   S.queue = S.queue.filter(q => q[0] > x);
   if (S.queue.length !== before) setPresence({ a: S.queue.length ? S.queue : null });
+}
+const ackFromSim = () => { if (S.sim && S.myPeer) handleAck(S.sim.ak.get(S.myPeer)); };
+
+/** Replays the host's stream up to now. Runs from the ticker and before every frame. */
+export function pump(now) {
+  if (S.isHost || !follower.sim) return;
+  follower.advance(now);
+  if (follower.changed) { follower.changed = false; ackFromSim(); }
+  if (follower.needsKeyframe && S.cur && S.cur.peer !== S.myPeer) requestKeyframe(S.cur.peer, now);
 }
 
 function onPeersChange(ch) {
@@ -184,22 +228,10 @@ function onPeersChange(ch) {
     const nm = p.presence && cleanName(p.presence.n);
     if (nm) knownNames.set(p.peer, nm);
   }
-  for (const p of ch.peers) {
-    if (p.sameTab || p.kind !== "viewer" || !sameBuild(p)) continue;
-    const s = p.presence && p.presence.s;
-    if (!s || seenS.get(p.peer) === s) continue;
-    seenS.set(p.peer, s);
-    let st = s;
-    if (Array.isArray(s.T)) lastTBy.set(p.peer, s.T);
-    else if (lastTBy.has(p.peer)) st = { ...s, T: lastTBy.get(p.peer) };
-    else continue;
-    if (!validState(st) || !better(p.peer, st)) continue;
-    if (S.isHost) stepDown(true);
-    acceptState(p.peer, st);
-  }
-  for (const p of ch.left || []) seenS.delete(p.peer);
+  const now = performance.now();
+  watchHosts(now);
   updateVersionCheck();
-  if (S.isHost && S.sim) { const n = processActions(ch.peers); if (n) { const now = performance.now(); if (now - lastPublish >= 30) publish(now); } }
+  if (S.isHost && rec) { if (processActions(ch.peers)) { flushStream(); ackFromSim(); } }
   decideHost();
   S.uiDirty = true;
 }
@@ -209,91 +241,113 @@ function onRoomError(err) {
 }
 
 /* ---------- hosting ---------- */
-// Who runs the game. The current host keeps the job for as long as its state keeps arriving, even if its tab
+// Who runs the game. The current host keeps the job for as long as its stream keeps arriving, even if its tab
 // is in the background (the simulation ticks from a worker, which browsers do not throttle). Only when the host
-// leaves, or its state stops for HOST_STALE_MS, the next player takes over: visible tabs first, then desktops
+// leaves, or its stream stops for HOST_STALE_MS, the next player takes over: visible tabs first, then desktops
 // before phones, then whoever joined earliest.
 const hostRank = p => (p.presence.hid ? 2 : 0) + (p.presence.mob ? 1 : 0);
 export function decideHost() {
   if (!S.room || !S.myPeer) return;
-  if (!S.joined) { if (S.isHost) stepDown(true); return; }
+  if (!S.joined) { if (S.isHost) stepDown(); return; }
   if (S.isHost) return;
   const now = performance.now();
   const live = joinedPeers(S.peerList);
-  const hostPeer = S.cur ? live.find(p => p.peer === S.cur.peer && p.presence.s) : null;
-  // over a direct channel the host's state arrives steadily, so silence means trouble sooner;
+  let hostPeer = S.cur ? live.find(p => p.peer === S.cur.peer && hostsEpoch(p) === S.cur.e) : null;
+  if (!hostPeer) {
+    // someone says they host a game we have not received yet: give their keyframe time to arrive
+    const ann = live.filter(p => !p.sameTab && hostsEpoch(p) !== null).sort((a, b) => hostsEpoch(b) - hostsEpoch(a) || (a.peer < b.peer ? -1 : 1))[0];
+    if (ann) {
+      const key = ann.peer + ":" + hostsEpoch(ann);
+      if (!announcedAt.has(key)) announcedAt.set(key, now);
+      if (now - announcedAt.get(key) < HOST_STALE_MS) { requestKeyframe(ann.peer, now); return; }
+      hostPeer = ann; // it never sent anything: treat it as a silent host
+    }
+  }
+  // over a direct channel the host's stream arrives steadily, so silence means trouble sooner;
   // a closed channel to the host (tab closed, connection lost) means trouble right away
   const linkGone = now - hostLinkLostAt < 8000;
   const direct = hostPeer && S.room.links && /^(direct|turn)$/.test((S.room.links()[hostPeer.peer] || {}).kind || "");
   const staleAfter = linkGone ? HOST_GONE_MS : direct ? HOST_STALE_DIRECT_MS : HOST_STALE_MS;
-  if (hostPeer && now - S.lastStateAt < staleAfter) return;
+  const following = hostPeer && S.cur && hostPeer.peer === S.cur.peer;
+  if (following && now - S.lastStateAt < staleAfter) return;
   // the host looks silent through the broker: make sure it is not our own broker connection that dropped
   if (hostPeer && !linkGone && !direct && (!S.connected || !S.connectedSince || now - S.connectedSince < 5000)) return;
   const pool = live.filter(p => p !== hostPeer).sort((a, b) => hostRank(a) - hostRank(b) || byJ(a, b));
   if (pool.length && pool[0].peer === S.myPeer) becomeHost();
 }
 /** Internals for tests and debugging. */
-export function hostDebug() { return { hostLinkLostAt, hostSince, lastStateAt: S.lastStateAt, now: performance.now() }; }
+export function hostDebug() {
+  return { hostLinkLostAt, hostSince, lastStateAt: S.lastStateAt, now: performance.now(), net: { ...netStats }, follow: { ...follower.stats, buffer: follower.buffer, lag: follower.lag } };
+}
+
+// One timer drives the game: the host's simulation, or the replay of the host's stream. It runs in a
+// worker because browsers throttle timers in background tabs, but not in workers.
 function startTicker() {
-  stopTicker();
+  if (ticker) return;
+  const tick = () => { if (S.isHost) hostLoop(); else pump(performance.now()); };
   try {
-    const src = "let t=0;onmessage=e=>{clearInterval(t);if(e.data>0)t=setInterval(()=>postMessage(0),e.data);};";
-    tickWorker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
-    tickWorker.onmessage = hostLoop;
-    tickWorker.postMessage(33);
-  } catch (_) { tickWorker = null; hostTimer = setInterval(hostLoop, 33); }
-}
-function stopTicker() {
-  if (tickWorker) { try { tickWorker.terminate(); } catch (_) {} tickWorker = null; }
-  if (hostTimer) { clearInterval(hostTimer); hostTimer = null; }
+    const src = "setInterval(()=>postMessage(0),33);";
+    const w = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    w.onmessage = tick;
+    ticker = w;
+  } catch (_) { ticker = setInterval(tick, 33); }
 }
 
-let onHostFx = null;
-/** Called by the renderer to see the host's own effects as they happen. */
-export function setHostFxHandler(fn) { onHostFx = fn; }
+let onFx = null;
+/** The renderer's handler for effects (shots, explosions, deaths) from the local copy of the game. */
+export function setFxHandler(fn) { onFx = fn; follower.onFx = fn; }
 
-let hostSince = 0;
 function becomeHost() {
-  S.isHost = true;
-  hostSince = performance.now();
-  S.sim = S.lastState ? Sim.fromSnapshot(S.lastState) : new Sim();
-  S.sim.e = (S.cur ? S.cur.e : 0) + 1;
-  pubTv = -1;
-  S.sim.onFx = f => { if (onHostFx) onHostFx(f); };
-  hostAcc = 0; lastHostTime = performance.now(); lastPublish = 0;
-  if (S.cur && S.cur.peer !== S.myPeer && S.joined) toast("Тепер гру ведете ви");
-  startTicker();
+  const now = performance.now();
+  follower.catchUp(); // start from the newest state we received
+  const sim = follower.sim || S.sim || new Sim();
+  follower.reset();
+  S.sim = sim;
+  sim.e = (S.cur ? S.cur.e : 0) + 1;
+  sim.onFx = f => { if (onFx) onFx(f); };
+  const prev = S.cur;
+  S.isHost = true; hostSince = now;
+  S.cur = { peer: S.myPeer, e: sim.e };
+  rec = new Recorder(sim); kfSentTo.clear();
+  hostAcc = 0; lastHostTime = now;
+  setPresence({ H: sim.e });
+  // everyone switches to our game: a keyframe directly to each player and one kept on the broker
+  const kf = makeKeyframe();
+  S.room.stream.send(kf); S.room.stream.retain(kf); lastRetain = now;
+  countOut(kf);
+  if (prev && prev.peer !== S.myPeer && S.joined) toast("Тепер гру ведете ви");
   hostLoop();
   S.uiDirty = true;
 }
 
-function stepDown(clearPresence) {
+/** Stop hosting; our copy stays on screen until the other host's keyframe replaces it. */
+function stepDown() {
   if (!S.isHost) return;
-  S.isHost = false;
-  stopTicker();
-  if (S.sim) {
-    const s = S.sim.serialize();
-    S.lastState = s;
-    S.latest = { t: s.t, dec: decodeState(s), at: performance.now() };
-    corr.clear();
-  }
-  S.sim = null;
-  if (clearPresence) setPresence({ s: null });
+  S.isHost = false; rec = null;
+  setPresence({ H: null });
+  if (S.room && S.room.stream) S.room.stream.retain(null);
   S.uiDirty = true;
 }
 
+function countOut(bytes) { netStats.out += bytes.length; netStats.outMsgs++; }
+
 function hostLoop() {
-  if (!S.isHost || !S.sim) return;
+  if (!S.isHost || !rec) return;
   const now = performance.now();
   hostAcc += Math.min(now - lastHostTime, 3000); lastHostTime = now;
   const list = S.room.peers();
-  S.sim.assignSeats(joinedPeers(list).map(p => p.peer));
-  const applied = processActions(list);
+  syncRoster(list);
+  processActions(list);
   let n = 0;
-  while (hostAcc >= STEP_MS && n < 90) { S.sim.step(STEP); hostAcc -= STEP_MS; n++; }
+  while (hostAcc >= STEP_MS && n < 90) { rec.step(); hostAcc -= STEP_MS; n++; }
   if (hostAcc >= STEP_MS) hostAcc = 0;
-  if (now - lastPublish >= PUBLISH_MS || (applied && now - lastPublish >= 30)) publish(now);
+  flushStream();
+  if (now - lastRetain > KF_RETAIN_MS) { lastRetain = now; S.room.stream.retain(makeKeyframe()); }
+  ackFromSim();
 }
+
+// Every change to the host's Sim goes through the recorder, so the stream carries it to everyone.
+function syncRoster(list) { rec.roster(joinedPeers(list).map(p => p.peer)); }
 
 function processActions(list) {
   let applied = 0;
@@ -301,30 +355,30 @@ function processActions(list) {
     if (p.kind !== "viewer") continue;
     const a = p.presence && p.presence.a;
     if (!Array.isArray(a)) continue;
-    const seat = S.sim.seats.indexOf(p.peer);
-    let last = S.sim.ak.get(p.peer) || 0;
-    const items = a.filter(x => Array.isArray(x) && Number.isInteger(x[0]) && x[0] > last).sort((x, y) => x[0] - y[0]);
-    for (const it of items) { if (seat >= 0) S.sim.apply(seat, it); last = it[0]; applied++; }
-    if (items.length) S.sim.ak.set(p.peer, last);
+    const items = a.filter(x => Array.isArray(x) && Number.isSafeInteger(x[0])).sort((x, y) => x[0] - y[0]);
+    for (const it of items) if (rec.act(p.peer, it)) applied++;
   }
   return applied;
 }
 
-const enc = new TextEncoder();
-let pubTv = -1, pubN = 0;
-function publish(now) {
-  lastPublish = now;
-  const full = S.sim.serialize(), s = { ...full };
-  // towers rarely change: send them when they do, and every 2 s for anyone who missed it
-  pubN++;
-  if (S.sim.tv === pubTv && pubN % 20 !== 0) delete s.T; else pubTv = S.sim.tv;
-  const size = () => enc.encode(JSON.stringify({ ...S.myPres, s })).length;
-  if (size() > PRESENCE_BUDGET) { s.F = []; }
-  while (size() > PRESENCE_BUDGET && s.E.length) s.E.length -= 6;
-  S.cur = { peer: S.myPeer, e: s.e, t: s.t };
-  S.lastState = full;
-  setPresence({ s });
-  handleAck(s.ak);
+/** Sends the inputs collected since the last batch. */
+function flushStream() {
+  if (!S.isHost || !rec) return;
+  const bytes = rec.batch();
+  if (!bytes) return;
+  S.room.stream.send(bytes);
+  countOut(bytes);
+}
+function makeKeyframe() {
+  flushStream();
+  return rec.keyframe(BUILD.id);
+}
+function sendKeyframeTo(label, now) {
+  if (now - (kfSentTo.get(label) || -1e9) < 300) return;
+  kfSentTo.set(label, now);
+  const kf = makeKeyframe();
+  S.room.stream.sendTo(label, kf);
+  countOut(kf);
 }
 
 /** Send one of our actions to the host: ["b", cell, type], ["u", cell], ["s", cell], ["r", 0|1], ["g", seat], ["n"]. */
@@ -390,11 +444,12 @@ export async function enterTable(name) {
   if (!S.lobby || S.soloMode) return;
   if (S.switching) { pendingTable = name; return; }
   S.switching = true; S.roomReady = false; S.uiDirty = true;
-  if (S.isHost) { stopTicker(); S.isHost = false; S.sim = null; }
+  S.isHost = false; rec = null; S.sim = null; follower.reset();
   const old = S.room; S.room = null;
   if (old && old !== S.lobby && typeof old.leave === "function") { try { await old.leave(); } catch (_) {} }
-  S.cur = null; S.lastState = null; S.latest = null; corr.clear(); sentAt.clear(); S.rttMs = null; seenS.clear(); lastTBy.clear(); S.versionBlock = null;
-  S.queue = []; S.peerList = []; fxPending.length = 0; S.myPres = {};
+  S.cur = null; sentAt.clear(); S.rttMs = null; S.versionBlock = null; lastAck = null;
+  heldKf.clear(); kfSentTo.clear(); announcedAt.clear();
+  S.queue = []; S.peerList = []; S.myPres = {};
   S.selCell = -1; S.buildType = -1; S.armedCell = -1;
   let t = null;
   try { t = await S.lobby.join(name); } catch (_) { t = null; }
@@ -422,6 +477,7 @@ export async function enterTable(name) {
 function attachRoom(r, onErr) {
   S.room = r;
   r.onPeers(onPeersChange, onErr || onRoomError);
+  if (r.stream) r.stream.on(onStream);
   // the host's tab closed or lost its connection: check again as soon as its state should have arrived
   if (r.onLinkLost) r.onLinkLost(label => {
     if (!S.cur || label !== S.cur.peer || S.isHost) return;
@@ -439,11 +495,15 @@ function attachRoom(r, onErr) {
 }
 
 export function goSolo(reason) {
-  if (S.isHost) { stopTicker(); if (S.sim) S.lastState = S.sim.serialize(); S.isHost = false; S.sim = null; }
+  // keep playing the game we were in, now alone
+  follower.catchUp();
+  if (follower.sim) S.sim = follower.sim;
+  follower.reset();
+  S.isHost = false; rec = null;
   const old = S.room;
   if (old && old !== S.lobby && typeof old.leave === "function") { try { const pr = old.leave(); if (pr && pr.catch) pr.catch(() => {}); } catch (_) {} }
-  S.soloMode = true; S.cur = null; seenS.clear(); S.myPeer = "solo"; S.queue = []; S.peerList = []; S.myPres = {}; S.tableName = null;
-  if (S.lastState) S.lastState = { ...S.lastState, ak: [] };
+  S.soloMode = true; S.cur = null; S.myPeer = "solo"; S.queue = []; S.peerList = []; S.myPres = {}; S.tableName = null; lastAck = null;
+  if (S.sim) { S.sim.ak = new Map(); S.sim.roster = []; }
   attachRoom(makeSoloRoom());
   S.roomReady = true;
   if (S.joined) setPresence({ n: S.myName, j: Date.now() });
@@ -474,12 +534,13 @@ export function sitDown(name) {
   rememberSeat();
   setPresence(joinPresence());
   setTimeout(decideHost, 60);
-  advertise(S.lastState ? S.lastState.w : 0);
+  advertise(S.sim ? S.sim.w : 0);
   S.uiDirty = true;
 }
 
 export async function initNet() {
-  setInterval(decideHost, 500);
+  startTicker();
+  setInterval(() => { watchHosts(performance.now()); decideHost(); }, 500);
   setInterval(rememberSeat, 20000);
   document.addEventListener("visibilitychange", () => { if (S.joined) setPresence({ hid: document.hidden ? 1 : null }); });
   S.lobby = makeLobby();

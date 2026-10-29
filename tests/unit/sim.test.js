@@ -63,15 +63,20 @@ test("a wave starts when everyone is ready and pays a bonus when cleared", () =>
   assert.equal(sim.w, 1);
 });
 
-test("snapshots restore the same game", () => {
-  const sim = table(3);
-  sim.gold.fill(2000);
-  FREE.slice(0, 12).forEach((c, i) => act(sim, i % 3, "b", c, i % 4));
-  for (let s = 0; s < 3; s++) act(sim, s, "r", 1);
-  for (let i = 0; i < 30 * 8; i++) sim.step(STEP);
-  const a = sim.serialize(), copy = Sim.fromSnapshot(JSON.parse(JSON.stringify(a))), b = copy.serialize();
-  delete a.F; delete b.F;
-  assert.deepEqual(b, a);
+test("the same inputs give the same game, bit for bit", () => {
+  const play = () => {
+    const sim = table(3);
+    sim.gold.fill(2000);
+    FREE.slice(0, 12).forEach((c, i) => act(sim, i % 3, "b", c, i % 4));
+    for (let s = 0; s < 3; s++) act(sim, s, "r", 1);
+    for (let i = 0; i < 30 * 20; i++) sim.step(STEP);
+    return sim;
+  };
+  const a = play(), b = play();
+  assert.ok(a.kills.some(k => k > 0), "the towers have been shooting");
+  assert.equal(a.stateHash(), b.stateHash());
+  b.gold[2] += 1e-9;
+  assert.notEqual(a.stateHash(), b.stateHash(), "the checksum notices the smallest difference");
 });
 
 test("waves grow with the number of players", () => {

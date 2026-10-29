@@ -9,8 +9,8 @@ export const BUILD = TEST.build || (typeof __BUILD__ !== "undefined" ? __BUILD__
 // Network settings. Tests and self-hosters can override any field with window.KV_NET_CONFIG.
 // Players talk directly browser-to-browser over WebRTC data channels, one channel per pair of players.
 // A public MQTT broker over WSS is used to find each other, to exchange connection offers (signaling),
-// as a slow fallback path when a direct channel cannot be made, and to keep a copy of each player's
-// state for whoever joins next.
+// as a slower fallback path when a direct channel cannot be made, and to keep each player's presence
+// and the latest keyframe of the game for whoever joins next.
 // ICE: Google STUN finds the public address; when a strict NAT blocks a direct path, a TURN server relays it.
 // By default the free shared Open Relay TURN (Metered) is used. For better reliability add your own TURN,
 // e.g. ExpressTURN or a Metered API key.

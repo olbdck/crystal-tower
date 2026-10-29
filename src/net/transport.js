@@ -1,9 +1,15 @@
 // Network transport: WebRTC data channels between players, MQTT over WSS for discovery,
-// signaling, late joiners and fallback. Exposes a small "room" API (presence + peers) to the session.
+// signaling, late joiners and fallback. Exposes a small "room" API to the session:
+// presence (small JSON state of each player) and a binary game stream (host -> players).
+//
+// Each pair of players shares two data channels: "game" (unordered) for presence, where only the
+// newest message matters, and "ev" (ordered, reliable) for the game stream, where every batch counts.
 import mqtt from "mqtt";
 import { NET_CONFIG } from "../config.js";
+import { bundle } from "./codec.js";
 
 const PEER_STALE_MS = 60000, MQTT_BG_MS = 2000, LINK_TIMEOUT_MS = 16000, LINK_RETRY_MS = 20000;
+const EV_CHANNEL_ID = 100, EV_BUNDLE_MS = 100;
 
 export function randLabel() {
   const a = new Uint8Array(10), abc = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -86,12 +92,13 @@ export function makeLobby() {
 
 async function joinTable(name, broker) {
   const me = await playerLabel();
-  const base = `${NET_CONFIG.topicRoot}/${name}/p/`, sigBase = `${NET_CONFIG.topicRoot}/${name}/sig/`;
+  const root = `${NET_CONFIG.topicRoot}/${name}/`;
+  const base = root + "p/", sigBase = root + "sig/", evBase = root + "ev/", kfBase = root + "kf/";
   const myTopic = base + me, mySig = sigBase + me;
   const p2p = NET_CONFIG.p2p !== false && typeof RTCPeerConnection !== "undefined";
   const ice = p2p ? await iceServers() : [];
   let pres = Object.freeze({}), others = new Map(), handlers = [], connHandlers = [], closed = false, cache = null;
-  let linkLostHandlers = [];
+  let linkLostHandlers = [], streamHandlers = [], evBuf = [], evTimer = 0, kfRetained = false;
   const instOf = new Map(); // label -> page-load instance last seen
   const lastDirect = new Map(); // label -> when we last heard from them over a direct channel
   let flushTimer = 0, lastMqtt = 0, hbTimer = 0, staleTimer = 0, pingTimer = 0, qCount = 0;
@@ -111,6 +118,7 @@ async function joinTable(name, broker) {
     queueMicrotask(() => { for (const h of handlers.slice()) { try { h(ch); } catch (e) { console.error(e); } } });
   }
   function emitConn(c) { for (const h of connHandlers.slice()) { try { h(c); } catch (_) {} } }
+  function emitStream(label, bytes) { for (const h of streamHandlers.slice()) { try { h(label, bytes); } catch (e) { console.error(e); } } }
 
   // one presence message, from either path; the newest wins
   function accept(label, msg) {
@@ -150,8 +158,19 @@ async function joinTable(name, broker) {
   function newLink(label, id) {
     closeLink(label);
     const pc = new RTCPeerConnection({ iceServers: ice });
-    const l = { pc, dc: null, state: "connecting", kind: null, rtt: null, id, since: Date.now(), retryAt: 0 };
+    const l = { pc, dc: null, ev: null, state: "connecting", kind: null, rtt: null, id, since: Date.now(), retryAt: 0 };
     links.set(label, l);
+    // both sides create the stream channel with the same id, so it needs no extra signaling
+    try {
+      const ev = pc.createDataChannel("ev", { negotiated: true, id: EV_CHANNEL_ID, ordered: true });
+      ev.binaryType = "arraybuffer";
+      ev.onmessage = e => {
+        if (links.get(label) !== l || !(e.data instanceof ArrayBuffer)) return;
+        lastDirect.set(label, Date.now());
+        emitStream(label, new Uint8Array(e.data));
+      };
+      l.ev = ev;
+    } catch (_) {}
     pc.addEventListener("connectionstatechange", () => {
       if (pc.connectionState === "failed" || pc.connectionState === "closed") failLink(label, l);
     });
@@ -221,7 +240,9 @@ async function joinTable(name, broker) {
   }
   async function onSignal(msg) {
     const from = msg && msg.from;
-    if (!p2p || closed || typeof from !== "string" || !/^[a-z0-9]{6,16}$/.test(from) || typeof msg.sdp !== "string") return;
+    if (closed || typeof from !== "string" || !/^[a-z0-9]{6,16}$/.test(from)) return;
+    if (msg.t === "kf") { emitStream(from, Uint8Array.of(3)); return; } // "send me a keyframe", from a player without a direct link
+    if (!p2p || typeof msg.sdp !== "string") return;
     try {
       if (msg.t === "offer" && from < me) {
         const l = newLink(from, msg.id);
@@ -269,8 +290,58 @@ async function joinTable(name, broker) {
     return Promise.resolve();
   }
 
+  /* ---- game stream ---- */
+  const evOpen = l => !!l && l.state === "open" && !!l.ev && l.ev.readyState === "open";
+  // the broker carries the stream only for players without a direct channel, in bundles every 100 ms
+  function viaBroker(bytes) {
+    evBuf.push(bytes);
+    if (!evTimer) evTimer = setTimeout(flushBroker, EV_BUNDLE_MS);
+  }
+  function flushBroker() {
+    evTimer = 0;
+    if (closed || !evBuf.length) return;
+    const list = evBuf; evBuf = [];
+    if (client.connected) client.publish(evBase + me, bundle(list), { qos: 0, retain: false });
+  }
+  const stream = {
+    /** Handler gets (label, Uint8Array) for every stream message from another player. */
+    on(h) { streamHandlers.push(h); return () => { streamHandlers = streamHandlers.filter(x => x !== h); }; },
+    /** To every other player: directly where possible, through the broker for the rest. */
+    send(bytes) {
+      let rest = false;
+      for (const label of others.keys()) {
+        const l = links.get(label);
+        if (evOpen(l)) { try { l.ev.send(bytes); } catch (_) { rest = true; } } else rest = true;
+      }
+      if (rest) viaBroker(bytes);
+    },
+    /** To one player (others on the broker path may see it too). */
+    sendTo(label, bytes) {
+      const l = links.get(label);
+      if (evOpen(l)) { try { l.ev.send(bytes); return; } catch (_) {} }
+      viaBroker(bytes);
+    },
+    /** Keep this message on the broker for players who arrive later; null removes it. */
+    retain(bytes) {
+      if (!client.connected || (!bytes && !kfRetained)) return;
+      kfRetained = !!bytes;
+      client.publish(kfBase + me, bytes || "", { qos: 0, retain: true });
+    },
+    /** Ask a player (the host) for a keyframe. */
+    request(label) {
+      const l = links.get(label);
+      if (evOpen(l)) { try { l.ev.send(Uint8Array.of(3)); return; } catch (_) {} }
+      sendSig(label, { t: "kf" });
+    },
+  };
+
   client.on("message", (topic, payload) => {
     if (closed) return;
+    if (topic.startsWith(evBase) || topic.startsWith(kfBase)) {
+      const label = topic.slice(root.length + 3);
+      if (label !== me && /^[a-z0-9]{6,16}$/.test(label) && payload && payload.length) emitStream(label, new Uint8Array(payload.buffer, payload.byteOffset, payload.length));
+      return;
+    }
     let msg = null;
     if (topic === mySig) {
       try { msg = JSON.parse(new TextDecoder().decode(payload)); } catch (_) { return; }
@@ -330,12 +401,12 @@ async function joinTable(name, broker) {
       queueMicrotask(() => { try { h(client.connected); } catch (_) {} });
       return () => { connHandlers = connHandlers.filter(x => x !== h); };
     },
-    emit: () => Promise.resolve(),
-    on: () => () => {},
+    stream,
     leave() {
       if (closed) return Promise.resolve();
-      closed = true; handlers = []; connHandlers = []; linkLostHandlers = [];
-      clearTimeout(flushTimer); clearInterval(hbTimer); clearInterval(staleTimer); clearInterval(pingTimer);
+      try { stream.retain(null); } catch (_) {}
+      closed = true; handlers = []; connHandlers = []; linkLostHandlers = []; streamHandlers = [];
+      clearTimeout(flushTimer); clearTimeout(evTimer); clearInterval(hbTimer); clearInterval(staleTimer); clearInterval(pingTimer);
       for (const label of [...links.keys()]) closeLink(label);
       try { if (client.connected) client.publish(myTopic, "", { qos: 0, retain: true }); } catch (_) {}
       try { client.end(false); } catch (_) {}
@@ -351,7 +422,7 @@ async function joinTable(name, broker) {
     let ticks = 0;
     const t = setInterval(() => { if (++ticks >= 20) fail({ type: "timeout" }); }, 1000);
     client.once("connect", () => {
-      client.subscribe({ [base + "+"]: { qos: 0 }, [mySig]: { qos: 1 } }, err => {
+      client.subscribe({ [base + "+"]: { qos: 0 }, [mySig]: { qos: 1 }, [evBase + "+"]: { qos: 0 }, [kfBase + "+"]: { qos: 0 } }, err => {
         if (done) return;
         if (err) { fail(err); return; }
         done = true; clearInterval(t);
