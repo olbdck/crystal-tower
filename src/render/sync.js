@@ -2,6 +2,7 @@
 // the crystal, the build cursor and teammates' pointers.
 import * as THREE from "three";
 import { COLS, ROWS, CRYSTAL, START_LIVES, TOWERS, ENEMIES, BLOCKED, SLOW_FACTOR, posAt, towerStats } from "../sim/rules.js";
+import { SPELLS, buildCost, towerStatsFor } from "../sim/cards.js";
 import { MAT, SEAT_HEX, col, geo, part, mergeGeos } from "./gfx.js";
 import { towerModel } from "./models.js";
 import { placeTower, removeTower, towerTop, updateTowerInstances, updateEnemyInstances, ENEMY_HEIGHT } from "./instancing.js";
@@ -222,8 +223,15 @@ export function updateCursor(v, now) {
     d.rangeDisk.material.color.copy(col(hex)); d.rangeRing.material.color.copy(col(hex));
   };
   const hc = S.armedCell >= 0 ? S.armedCell : S.hoverCell;
+  const pvOf = o => (o >= 0 ? v.pv[o] : 0);
+  // aiming a spell: the blast area, or the tower it would charge
+  const spell = S.castSlot >= 0 && seat >= 0 ? SPELLS[v.hand[seat][S.castSlot]] : null;
+  if (spell && hc >= 0) {
+    if (spell.target === "cell") showRange(hc, spell.radius, 0xff7a2a);
+    else if (spell.target === "tower" && v.tmap.has(hc)) { const t = v.tmap.get(hc); showRange(hc, towerStatsFor(t.ty, t.lv, pvOf(t.o)).range, 0xfff07a); }
+  }
   if (S.buildType >= 0 && hc >= 0 && seat >= 0 && !v.tmap.has(hc) && v.ph <= 2) {
-    const ok = canBuildAt(v, hc) && myGold(v) >= TOWERS[S.buildType].cost;
+    const ok = canBuildAt(v, hc) && myGold(v) >= buildCost(pvOf(seat), S.buildType);
     const hex = ok ? 0x8dff6a : 0xff3b30, x = hc % COLS + 0.5, z = ((hc / COLS) | 0) + 0.5;
     d.hoverTile.visible = true; d.hoverTile.position.set(x, 0.012, z);
     d.hoverTile.material.color.copy(col(hex)); d.hoverTile.material.opacity = 0.42 + Math.sin(now * 0.008) * 0.12;
@@ -231,7 +239,7 @@ export function updateCursor(v, now) {
       const gm = d.ghosts[S.buildType]; gm.visible = true; gm.position.set(x, 0, z);
       MAT.ghost.color.copy(col(ok ? myHex : 0x6b6259));
       MAT.ghost.opacity = ok ? 0.55 : 0.35;
-      showRange(hc, towerStats(S.buildType, 1).range, ok ? 0xfff1bd : 0xff3b30);
+      showRange(hc, towerStatsFor(S.buildType, 1, pvOf(seat)).range, ok ? 0xfff1bd : 0xff3b30);
       const pv = synergyPreview(v, hc, seat);
       synHint = { kind: "build", cell: hc, ty: S.buildType, ...pv };
       synKeyNow = `b${hc}|${seat}|${synKey}`;
@@ -240,13 +248,13 @@ export function updateCursor(v, now) {
   }
   const st = S.selCell >= 0 ? v.tmap.get(S.selCell) : null;
   if (st) {
-    showRange(S.selCell, towerStats(st.ty, st.lv).range, SEAT_HEX[st.o] || 0xf1cd6a);
+    showRange(S.selCell, towerStatsFor(st.ty, st.lv, pvOf(st.o)).range, SEAT_HEX[st.o] || 0xf1cd6a);
     d.selRing.visible = true; d.selRing.position.set(S.selCell % COLS + 0.5, 0.03, ((S.selCell / COLS) | 0) + 0.5);
     d.selRing.rotation.z = now * 0.001;
     if (S.upgradePreview && st.lv < 3) {
       d.nextRing.visible = true;
       d.nextRing.position.set(S.selCell % COLS + 0.5, 0.024, ((S.selCell / COLS) | 0) + 0.5);
-      d.nextRing.scale.setScalar(towerStats(st.ty, st.lv + 1).range);
+      d.nextRing.scale.setScalar(towerStatsFor(st.ty, st.lv + 1, pvOf(st.o)).range);
       d.nextRing.material.opacity = 0.65 + Math.sin(now * 0.01) * 0.25;
     }
     if (!synKeyNow) {

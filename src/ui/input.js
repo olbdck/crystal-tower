@@ -1,11 +1,13 @@
 // Player input: the tower cards in hand, clicks and taps on the board, keyboard shortcuts,
 // and the actions they send (build, upgrade, sell, ready).
-import { TOWERS, BLOCKED, MAX_TOWERS, upgradeCost } from "../sim/rules.js";
+import { TOWERS, BLOCKED, MAX_TOWERS } from "../sim/rules.js";
+import { buildCost, upCost } from "../sim/cards.js";
 import { getView } from "../net/view.js";
 import { act, setPresence } from "../net/session.js";
 import { pickCell, glCanvas } from "../render/scene.js";
 import { portrait } from "../render/portraits.js";
-import { mySeat, myGold, canBuildAt } from "../game.js";
+import { mySeat, myGold, myPv, myOffer, canBuildAt } from "../game.js";
+import { selectSpell, castAt, openOffer } from "./cards.js";
 import { S } from "../state.js";
 import { $, ICON, toast } from "./dom.js";
 import { closeTopModal } from "./modals.js";
@@ -47,7 +49,7 @@ export function selectBuild(i) {
     } catch (_) {}
   }
   if (S.buildType >= 0) S.selCell = -1;
-  S.armedCell = -1; sendHover(true); S.uiDirty = true;
+  S.armedCell = -1; S.castSlot = -1; sendHover(true); S.uiDirty = true;
 }
 
 /* ---------- where our pointer is, for teammates ---------- */
@@ -63,13 +65,13 @@ export function sendHover(force) {
 }
 
 /* ---------- actions ---------- */
-export function cancelAll() { S.buildType = -1; S.selCell = -1; S.armedCell = -1; S.uiDirty = true; sendHover(true); }
+export function cancelAll() { S.buildType = -1; S.selCell = -1; S.armedCell = -1; S.castSlot = -1; S.uiDirty = true; sendHover(true); }
 
 export function doUpgrade() {
   const v = getView(performance.now()), tw = v && v.tmap.get(S.selCell);
   if (!tw || mySeat(v) < 0) return;
   if (tw.lv >= 3) return toast("Вежа вже максимального рівня");
-  const cost = upgradeCost(tw.ty, tw.lv);
+  const cost = upCost(myPv(v), tw.ty, tw.lv);
   if (myGold(v) < cost) return toast(`Потрібно ${cost} золота`);
   act("u", tw.c); S.uiDirty = true;
 }
@@ -84,6 +86,7 @@ export function doReady() {
   if (!v) return;
   const seat = mySeat(v);
   if (v.ph >= 3) { if (seat >= 0) act("n"); return; }
+  if (myOffer(v).length) { openOffer(); return; }
   if (seat < 0 || v.ph !== 1) return;
   const pending = [...S.queue].reverse().find(q => q[1] === "r");
   const curReady = pending ? !!pending[2] : v.ready[seat];
@@ -95,13 +98,14 @@ function onBoardClick(e) {
   const c = pickCell(e.clientX, e.clientY);
   if (!v || c < 0) { if (c < 0) { S.selCell = -1; S.armedCell = -1; S.uiDirty = true; } return; }
   const seat = mySeat(v);
+  if (castAt(v, c)) return;
   if (v.tmap.has(c)) { S.selCell = S.selCell === c ? -1 : c; S.buildType = -1; S.armedCell = -1; S.uiDirty = true; sendHover(true); return; }
   if (S.buildType < 0) { S.selCell = -1; S.armedCell = -1; S.uiDirty = true; return; }
   if (seat < 0) { toast("Ви глядач: вільного місця поки немає"); return; }
   if (v.ph > 2) return;
   if (BLOCKED[c]) { toast("На стежці будувати не можна"); S.armedCell = -1; return; }
   if (!canBuildAt(v, c)) { toast(v.towers.length >= MAX_TOWERS ? `На столі вже ${MAX_TOWERS} веж, це максимум` : "Клітинка зайнята"); return; }
-  const cost = TOWERS[S.buildType].cost;
+  const cost = buildCost(myPv(v), S.buildType);
   if (myGold(v) < cost) { toast(`Потрібно ${cost} золота`); return; }
   if (lastPointerType === "touch" && S.armedCell !== c) { S.armedCell = c; sendHover(true); toast("Торкніться ще раз, щоб поставити"); return; }
   S.armedCell = -1;
@@ -135,8 +139,8 @@ export function initInput() {
   document.addEventListener("keydown", e => {
     if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    const m = /^Digit([1-4])$/.exec(e.code);
-    if (m) { selectBuild(+m[1] - 1); e.preventDefault(); }
+    const m = /^Digit([1-7])$/.exec(e.code);
+    if (m) { if (+m[1] <= 4) selectBuild(+m[1] - 1); else selectSpell(+m[1] - 5); e.preventDefault(); }
     else if (e.code === "Escape") { if (!closeTopModal()) cancelAll(); }
     else if (e.code === "KeyU") doUpgrade();
     else if (e.code === "KeyS") doSell();

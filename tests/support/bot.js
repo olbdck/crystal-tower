@@ -3,7 +3,36 @@
 // A seed varies how often each bot shops, its first tower type and which of the best free cells it takes,
 // so averages over several seeds show the difficulty better than one deterministic game.
 import { Sim } from "../../src/sim/sim.js";
-import { TOWERS, PATHS, BLOCKED, COLS, ROWS, STEP, posAt, upgradeCost } from "../../src/sim/rules.js";
+import { TOWERS, PATHS, BLOCKED, COLS, ROWS, STEP, START_LIVES, posAt, upgradeCost } from "../../src/sim/rules.js";
+import { P, SP, SPELLS, isSpellCode } from "../../src/sim/cards.js";
+
+const PREFER = ["temper", "eye", "archer", "craft", "powder", "arc", "winter", "trade"].map(k => P[k]);
+/**
+ * A bot's card play: takes the most useful passive on offer (else the first spell) and casts spells
+ * when they help. `act(...args)` sends one action for this seat.
+ */
+export function botCards(sim, seat, act) {
+  const offer = sim.offer[seat];
+  if (offer.length) {
+    const passive = PREFER.find(p => offer.includes(p));
+    act("k", passive !== undefined ? offer.indexOf(passive) : offer.findIndex(isSpellCode));
+    return;
+  }
+  if (sim.ph !== 2) return;
+  const foes = sim.enemies.filter(e => !e.dead);
+  const front = foes.slice().sort((a, b) => (PATHS[a.ln].len - a.d) - (PATHS[b.ln].len - b.d))[0];
+  sim.hand[seat].some((id, idx) => {
+    if (sim.gold[seat] < SPELLS[id].cost) return false;
+    let target = -1;
+    if (id === SP.heal && sim.l > START_LIVES - 3) return false;
+    if ((id === SP.storm || id === SP.quake) && foes.length < 8) return false;
+    if (id === SP.rush && foes.length < 6) return false;
+    if (id === SP.fire) { if (foes.length < 3) return false; target = Math.floor(front.y) * COLS + Math.floor(front.x); }
+    if (id === SP.surge) { const tw = [...sim.towers.values()].sort((a, b) => b.lv - a.lv)[0]; if (!tw || foes.length < 4) return false; target = tw.c; }
+    act("m", idx, target);
+    return true;
+  });
+}
 
 const samples = [];
 PATHS.forEach((p, ln) => { for (let d = 0; d < p.len; d += 0.25) samples.push(posAt(ln, d)); });
@@ -23,7 +52,7 @@ function rng(seed) {
 }
 
 /** Plays one game with n bot players; returns the wave reached, lives left and how each wave went. */
-export function playGame(n, { archersOnly = false, seed = 0 } = {}) {
+export function playGame(n, { archersOnly = false, seed = 0, cards = true } = {}) {
   const sim = new Sim();
   sim.assignSeats(Array.from({ length: n }, (_, i) => "bot" + i));
   let seq = 0;
@@ -48,7 +77,7 @@ export function playGame(n, { archersOnly = false, seed = 0 } = {}) {
   const lost = [];
   let t = 0, lastW = 0, livesAtStart = sim.l;
   while (sim.ph <= 2 && t < 30 * 60 * 60) {
-    if (t % period === 0) for (let s = 0; s < n; s++) spend(s);
+    if (t % period === 0) for (let s = 0; s < n; s++) { if (cards) botCards(sim, s, (...a) => act(s, ...a)); spend(s); }
     if (sim.ph === 1) for (let s = 0; s < n; s++) act(s, "r", 1);
     sim.step(STEP); t++;
     if (sim.w !== lastW) { if (lastW) lost.push(livesAtStart - sim.l); lastW = sim.w; livesAtStart = sim.l; }

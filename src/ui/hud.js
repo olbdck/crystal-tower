@@ -1,6 +1,7 @@
 // The heads-up display: connection plaque, wave banner, crystal, ready button, gold and cards,
 // the selected tower panel, the party list and the end-of-game sign.
-import { MAX_SEATS, MAX_WAVES, START_LIVES, TOWERS, ENEMIES, GIFT, SYN_BONUS, towerStats, upgradeCost, sellValue, waveTotal, waveBosses, waveMix } from "../sim/rules.js";
+import { MAX_SEATS, MAX_WAVES, START_LIVES, TOWERS, ENEMIES, GIFT, SYN_BONUS, waveTotal, waveBosses, waveMix } from "../sim/rules.js";
+import { buildCost, upCost, sellFor, towerStatsFor } from "../sim/cards.js";
 import { TEST } from "../config.js";
 import { S } from "../state.js";
 import { act, advertise, nameOfPeer } from "../net/session.js";
@@ -8,7 +9,8 @@ import { SEAT_CSS } from "../render/gfx.js";
 import { isNarrow } from "../render/scene.js";
 import { otherOwners, synKey } from "../render/sync.js";
 import { portrait } from "../render/portraits.js";
-import { mySeat, myGold } from "../game.js";
+import { mySeat, myGold, myPv, myOffer } from "../game.js";
+import { updateCards, passiveIcons } from "./cards.js";
 import { $, ICON, toast, announce } from "./dom.js";
 import { refreshCardArt } from "./input.js";
 import { updateJoinCard, copyInvite } from "./join.js";
@@ -69,7 +71,11 @@ export function updateUI(v, now) {
   // ready button
   const rb = $("readyBtn"), rl = $("readyLbl"), rs = $("readySub");
   rb.classList.remove("nudge");
-  if (v && v.ph >= 3) { rb.disabled = seat < 0; rb.classList.remove("on"); rl.textContent = "Нова гра"; rs.textContent = "з хвилі 1"; }
+  if (v && v.ph <= 2 && myOffer(v).length) {
+    // a card pick is waiting: the button opens it (and getting ready waits for it)
+    rb.disabled = false; rb.classList.remove("on"); rb.classList.add("nudge");
+    rl.textContent = "Карта"; rs.textContent = "оберіть 1 з 3";
+  } else if (v && v.ph >= 3) { rb.disabled = seat < 0; rb.classList.remove("on"); rl.textContent = "Нова гра"; rs.textContent = "з хвилі 1"; }
   else if (v && v.ph === 1 && seat >= 0) {
     const pr2 = [...S.queue].reverse().find(q => q[1] === "r");
     const r = pr2 ? !!pr2[2] : v.ready[seat];
@@ -88,16 +94,21 @@ export function updateUI(v, now) {
   $("myGold").textContent = g === null ? "—" : String(g);
   if (g !== null && lastGold !== null && g > lastGold) { const p = $("purse"); p.classList.remove("bump"); void p.offsetWidth; p.classList.add("bump"); }
   lastGold = g;
+  const pv = v ? myPv(v) : 0;
   TOWERS.forEach((t, i) => {
-    const b = $("card" + i);
+    const b = $("card" + i), cost = buildCost(pv, i);
     b.classList.toggle("sel", S.buildType === i);
-    const poor = g !== null && g < t.cost;
+    const ce = b.querySelector(".cost");
+    if (ce.textContent !== String(cost)) ce.textContent = String(cost);
+    b.classList.toggle("cheap", cost < t.cost);
+    const poor = g !== null && g < cost;
     b.classList.toggle("poor", poor);
     const need = b.querySelector(".need");
     need.hidden = !poor;
-    if (poor) need.textContent = `Бракує ${t.cost - g}`;
+    if (poor) need.textContent = `Бракує ${cost - g}`;
     b.disabled = seat < 0 || (v && v.ph > 2);
   });
+  updateCards(v, g);
 
   // selected tower
   const tw = v && S.selCell >= 0 ? v.tmap.get(S.selCell) : null;
@@ -105,8 +116,8 @@ export function updateUI(v, now) {
   if (!tw) { sc.hidden = true; if (S.selCell >= 0 && v) S.selCell = -1; lastSelKey = ""; }
   else {
     sc.hidden = false;
-    const s = towerStats(tw.ty, tw.lv), syn = v.syn.get(tw.c) || 0;
-    const key = [tw.c, tw.ty, tw.lv, tw.o, syn, v.seats[tw.o] ? nameOfPeer(v.seats[tw.o]) : "", g, seat, synKey, v.seats.join(",")].join("|");
+    const opv = tw.o >= 0 ? v.pv[tw.o] : 0, s = towerStatsFor(tw.ty, tw.lv, opv), syn = v.syn.get(tw.c) || 0;
+    const key = [tw.c, tw.ty, tw.lv, tw.o, syn, v.seats[tw.o] ? nameOfPeer(v.seats[tw.o]) : "", g, seat, synKey, v.seats.join(","), opv, pv].join("|");
     if (key !== lastSelKey) {
       lastSelKey = key;
       const url = TEST.noRender ? "" : portrait("t", tw.ty, tw.lv, tw.o); if (url) $("selImg").src = url;
@@ -118,13 +129,13 @@ export function updateUI(v, now) {
       const on = document.createElement("span"); on.textContent = tw.o < 0 ? "нічия вежа" : v.seats[tw.o] ? nameOfPeer(v.seats[tw.o]) + (tw.o === seat ? " (ви)" : "") : "вільне місце";
       owner.append(sw, on);
       // current stats, and what the next level would give (upgrade preview)
-      const nx = tw.lv < 3 ? towerStats(tw.ty, tw.lv + 1) : null, synK = 1 + SYN_BONUS * syn;
+      const nx = tw.lv < 3 ? towerStatsFor(tw.ty, tw.lv + 1, opv) : null, synK = 1 + SYN_BONUS * syn;
       const rows = [
         ["Шкода", (s.dmg * synK).toFixed(1), nx && (nx.dmg * synK).toFixed(1)],
         ["Постріл", `${s.rate.toFixed(2)} с`, nx && `${nx.rate.toFixed(2)} с`],
         ["Дальність", s.range.toFixed(1), nx && nx.range.toFixed(1)],
       ];
-      if (tw.ty === 1) rows.push(["Вибух", String(s.splash), null]);
+      if (tw.ty === 1) rows.push(["Вибух", String(+s.splash.toFixed(2)), null]);
       if (tw.ty === 2) rows.push(["Холод", `${s.slowDur.toFixed(1)} с`, nx && `${nx.slowDur.toFixed(1)} с`]);
       if (tw.ty === 3) rows.push(["Перескоки", String(s.chain), nx && String(nx.chain)]);
       rows.push(["Синергія", syn ? `+${Math.round(syn * SYN_BONUS * 100)}%` : "—", null]);
@@ -142,8 +153,8 @@ export function updateUI(v, now) {
       }
       const up = $("upBtn"), sell = $("sellBtn");
       if (tw.lv >= 3) { up.textContent = "Максимум"; up.disabled = true; }
-      else { const c = upgradeCost(tw.ty, tw.lv); up.textContent = `Покращити · ${c}`; up.disabled = seat < 0 || (g || 0) < c; }
-      sell.textContent = `Продати · ${sellValue(tw.ty, tw.lv)}`;
+      else { const c = upCost(pv, tw.ty, tw.lv); up.textContent = `Покращити · ${c}`; up.disabled = seat < 0 || (g || 0) < c; }
+      sell.textContent = `Продати · ${sellFor(opv, tw.ty, tw.lv)}`;
       sell.disabled = tw.o !== seat;
       $("selNote").textContent = tw.o === seat ? "" : "Покращення за ваше золото. За вбивства половина нагороди йде власнику, решта ділиться між усіма.";
       const sl = $("selSyn"); sl.textContent = "";
@@ -168,14 +179,14 @@ export function updateUI(v, now) {
   for (let i = 0; i < MAX_SEATS; i++) {
     const peer = v ? v.seats[i] : "";
     const away = !!peer && !S.soloMode && peer !== S.myPeer && !S.peerList.some(p => p.peer === peer);
-    rows.push([i, peer, peer ? nameOfPeer(peer) : "", v ? Math.floor(v.gold[i]) : 0, v ? v.kills[i] : 0, !!(v && v.ph === 1 && v.ready[i]), !S.soloMode && !!S.cur && S.cur.peer === peer, away ? AWAY : linkInfo(peer), away]);
+    rows.push([i, peer, peer ? nameOfPeer(peer) : "", v ? Math.floor(v.gold[i]) : 0, v ? v.kills[i] : 0, !!(v && v.ph === 1 && v.ready[i]), !S.soloMode && !!S.cur && S.cur.peer === peer, away ? AWAY : linkInfo(peer), away, v ? v.pv[i] : 0]);
   }
   const specs = S.peerList.filter(p => p.kind === "viewer" && !(v && v.seats.includes(p.peer))).length;
   const pkey = JSON.stringify([rows, seat, g !== null && g >= GIFT, v && v.ph, specs, S.soloMode, S.roomReady, S.tableName]);
   if (pkey !== lastPartyKey) {
     lastPartyKey = pkey;
     const ul = $("party"); ul.textContent = "";
-    for (const [i, peer, nm, gold, kills, ready, host, link, away] of rows) {
+    for (const [i, peer, nm, gold, kills, ready, host, link, away, ppv] of rows) {
       const li = document.createElement("li");
       li.className = "hero" + (peer ? "" : " empty") + (i === seat ? " me" : "") + (away ? " away" : "");
       if (!peer && !S.soloMode && S.roomReady && S.tableName) {
@@ -201,6 +212,7 @@ export function updateUI(v, now) {
         const ks = document.createElement("i"); ks.textContent = `${kills} вбивств`;
         sm.append(gs, ks);
         plate.appendChild(sm);
+        if (ppv) plate.appendChild(passiveIcons(ppv));
         if (host || link) {
           const tg = document.createElement("span"); tg.className = "tag";
           if (link) { const lk = document.createElement("span"); lk.className = "lnk " + link.cls; lk.textContent = link.text; lk.title = link.title; tg.appendChild(lk); }

@@ -9,11 +9,12 @@
 //   HASH h          state checksum after the last tick, to catch divergence
 // Each player applies the same inputs to its own copy of the Sim and gets the same state as the host.
 import { Sim } from "../sim/sim.js";
+import { HAND_MAX, PASSIVES, SPELLS } from "../sim/cards.js";
 import { BLOCKED, COLS, ENEMIES, MAX_SEATS, MAX_WAVES, NO_OWNER, PATHS, ROWS, TOWERS, posAt } from "../sim/rules.js";
 
 export const MSG_KEYFRAME = 1, MSG_BATCH = 2, MSG_REQ = 3, MSG_BUNDLE = 4;
 export const OP_TICK = 1, OP_ROSTER = 2, OP_ACT = 3, OP_HASH = 4;
-const FORMAT = 2; // 2: wave timer for the crystal's gold drip
+const FORMAT = 3; // 2: wave timer for the crystal's gold drip; 3: cards
 const MAX_ROSTER = 32, MAX_LABEL = 24, MAX_ARGS = 3;
 
 const te = new TextEncoder(), td = new TextDecoder();
@@ -86,12 +87,17 @@ export function encodeKeyframe(sim, { e, seq, build }) {
   let r = 0;
   for (let i = 0; i < MAX_SEATS; i++) if (sim.ready[i]) r |= 1 << i;
   w.u8(r);
-  for (let i = 0; i < MAX_SEATS; i++) { w.str(sim.seats[i]); w.f64(sim.gold[i]); w.uv(sim.kills[i]); }
+  for (let i = 0; i < MAX_SEATS; i++) {
+    w.str(sim.seats[i]); w.f64(sim.gold[i]); w.uv(sim.kills[i]);
+    w.uv(sim.pv[i]); w.f64(sim.gr[i]);
+    w.u8(sim.hand[i].length); for (const c of sim.hand[i]) w.u8(c);
+    w.u8(sim.offer[i].length); for (const c of sim.offer[i]) w.u8(c);
+  }
   w.uv(sim.roster.length); for (const l of sim.roster) w.str(l);
   w.uv(sim.ak.size); for (const [l, x] of sim.ak) { w.str(l); w.uv(x); }
   w.uv(sim.gone.size); for (const [l, t] of sim.gone) { w.str(l); w.uv(t); }
   w.uv(sim.towers.size);
-  for (const tw of sim.towers.values()) { w.u8(tw.c); w.u8(tw.ty); w.u8(tw.lv); w.sv(tw.o); w.f64(tw.cd); }
+  for (const tw of sim.towers.values()) { w.u8(tw.c); w.u8(tw.ty); w.u8(tw.lv); w.sv(tw.o); w.f64(tw.cd); w.f64(tw.bt || 0); }
   w.uv(sim.enemies.length);
   for (const en of sim.enemies) {
     w.uv(en.id); w.u8(en.ty | (en.ln << 4) | (en.sl ? 128 : 0)); w.f64(en.d); w.f64(en.hp);
@@ -110,7 +116,18 @@ export function decodeKeyframe(bytes) {
   m.pc = r.u8(); m.hs = r.f64(); m.bk = r.f64(); m.u = r.u8(); m.nid = r.uv();
   if (![1, 2, 3, 4].includes(m.ph) || m.w > MAX_WAVES || m.pc < 1 || m.pc > MAX_SEATS) throw new RangeError("bad state");
   const rb = r.u8();
-  for (let i = 0; i < MAX_SEATS; i++) { m.seats[i] = r.str(); m.gold[i] = r.f64(); m.kills[i] = r.uv(); m.ready[i] = !!(rb & (1 << i)); }
+  const cards = (n, max, limit) => {
+    if (n > limit) throw new RangeError("bad cards");
+    const out = [];
+    for (let k = 0; k < n; k++) { const c = r.u8(); if (c >= max) throw new RangeError("bad card"); out.push(c); }
+    return out;
+  };
+  for (let i = 0; i < MAX_SEATS; i++) {
+    m.seats[i] = r.str(); m.gold[i] = r.f64(); m.kills[i] = r.uv(); m.ready[i] = !!(rb & (1 << i));
+    m.pv[i] = r.uv(); m.gr[i] = r.f64();
+    m.hand[i] = cards(r.u8(), SPELLS.length, HAND_MAX);
+    m.offer[i] = cards(r.u8(), PASSIVES.length + SPELLS.length, 3);
+  }
   const nr = r.uv();
   if (nr > MAX_ROSTER) throw new RangeError("bad roster");
   m.roster = []; for (let i = 0; i < nr; i++) m.roster.push(r.str());
@@ -123,9 +140,9 @@ export function decodeKeyframe(bytes) {
   const nt = r.uv();
   if (nt > COLS * ROWS) throw new RangeError("bad towers");
   for (let i = 0; i < nt; i++) {
-    const c = r.u8(), ty = r.u8(), lv = r.u8(), o = r.sv(), cd = r.f64();
+    const c = r.u8(), ty = r.u8(), lv = r.u8(), o = r.sv(), cd = r.f64(), bt = r.f64();
     if (c >= COLS * ROWS || BLOCKED[c] || !TOWERS[ty] || lv < 1 || lv > 3 || !(o === NO_OWNER || (o >= 0 && o < MAX_SEATS))) throw new RangeError("bad tower");
-    m.towers.set(c, { c, ty, lv, o, cd });
+    m.towers.set(c, { c, ty, lv, o, cd, bt });
   }
   const ne = r.uv();
   if (ne > 500) throw new RangeError("bad enemies");

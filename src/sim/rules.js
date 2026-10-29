@@ -98,7 +98,15 @@ export function enemyTypeAt(w, i, pc) {
   if (w >= 2 && r < 0.4) return 1;
   return 0;
 }
-export function hpScale(w, pc) { const x = w - 1; return (1 + 0.31 * x + 0.037 * x * x) * (0.6 + 0.4 * pc); }
+/** A pick of 1 card out of 3 (src/sim/cards.js) comes after every CARD_EVERY-th wave. */
+export const CARD_EVERY = 3;
+// Cards make the team stronger every CARD_EVERY waves; enemies get tougher to match, more so with more
+// players (more cards at the table). Tuned with seeded bot games: npm run balance.
+const CARD_HP = [0.02, 0.05, 0.05, 0.05, 0.06];
+export function hpScale(w, pc) {
+  const x = w - 1, cards = Math.floor(x / CARD_EVERY);
+  return (1 + 0.31 * x + 0.037 * x * x) * (0.6 + 0.4 * pc) * (1 + CARD_HP[Math.min(5, Math.max(1, pc)) - 1] * cards);
+}
 export function spawnInterval(w, pc) { return Math.max(0.28, 0.85 / (0.6 + 0.4 * pc)); }
 export function waveMix(w, pc) {
   const c = [0, 0, 0, 0], n = waveTotal(w, pc);

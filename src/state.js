@@ -34,6 +34,7 @@ export const S = {
   hoverCell: -1,
   armedCell: -1, // touch: first tap arms a cell, second tap builds
   buildType: -1, // selected tower card
+  castSlot: -1, // spell in hand waiting for a target on the board
   selCell: -1, // selected tower on the board
   upgradePreview: false, // pointer is on "Upgrade": show the next level's range
 

@@ -4,6 +4,7 @@ import { Sim } from "../../src/sim/sim.js";
 import { BLOCKED, TOWERS, STEP } from "../../src/sim/rules.js";
 import { Reader, Writer, bundle, cleanAction, decodeBatch, decodeKeyframe, unbundle } from "../../src/net/codec.js";
 import { Follower, Recorder } from "../../src/net/stream.js";
+import { botCards } from "../support/bot.js";
 
 const FREE = [...BLOCKED.keys()].filter(c => !BLOCKED[c]);
 const STEP_MS = STEP * 1000;
@@ -48,6 +49,7 @@ function botHost(players) {
       if (sim.gold[seat] >= TOWERS[ty].cost && !sim.towers.has(cell)) act(label, "b", cell, ty);
       const mine = [...sim.towers.values()].find(t => t.o === seat && t.lv < 3);
       if (mine && sim.gold[seat] > 200) act(label, "u", mine.c);
+      botCards(sim, seat, (...a) => act(label, ...a));
       if (sim.ph === 1) act(label, "r", 1);
     });
   }

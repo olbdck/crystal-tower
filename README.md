@@ -17,7 +17,15 @@ The in-game interface is in Ukrainian.
 - A wave starts when everyone is ready, or after a 20-second break. There are 20 waves; every fifth one brings a boss.
 - Each player has their own gold. A kill pays half its bounty to the owner of the tower that landed it; the other half is shared equally by everyone at the table, so nobody is left without income. During a wave the crystal also gives everyone 1 gold a second, up to half of the wave bonus; the rest of the bonus comes when the wave is cleared.
 
-Keys: `1–4` towers, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
+Keys: `1–4` towers, `5–7` spells, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
+
+## Cards
+
+After every third wave (3, 6, … 18) each player picks 1 of 3 cards, drawn for them alone. The pick has to be made before pressing ready.
+
+- **Passive cards** stay for the rest of the game and act on your own towers or on what you pay: cheaper Archers or upgrades, longer frost, a wider cannon blast, one more lightning jump, +10% range or damage, a better refund when selling. They show as small icons next to your name.
+- **Spells** cost gold, are cast once during a wave and then disappear (up to 3 in hand): Fireball, Blizzard (everyone slowed), Earthquake (enemies pushed back), Crystal Power (+3 lives), Overcharge (a tower fires twice as fast for 8 s) and Gold Rush (double kill share for 10 s). Damage grows with the waves.
+- Enemies get a little tougher after each card pick, more so with more players, so the cards add choices rather than make the game easy.
 
 ## Synergy
 

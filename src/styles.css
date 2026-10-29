@@ -258,10 +258,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 .card.t1 { --glow: #b4552a; --rib-hi: #a24526; --rib-lo: #5e2412; }
 .card.t2 { --glow: #3b8dc4; --rib-hi: #2f7cb4; --rib-lo: #164466; }
 .card.t3 { --glow: #7b4fd6; --rib-hi: #6c3fc6; --rib-lo: #35196e; }
-.card:nth-child(1) { transform: rotate(-9deg) translateY(10px); }
-.card:nth-child(2) { transform: rotate(-3deg) translateY(3px); }
-.card:nth-child(3) { transform: rotate(3deg) translateY(3px); }
-.card:nth-child(4) { transform: rotate(9deg) translateY(10px); }
+.hand .card:nth-child(1) { transform: rotate(-9deg) translateY(10px); }
+.hand .card:nth-child(2) { transform: rotate(-3deg) translateY(3px); }
+.hand .card:nth-child(3) { transform: rotate(3deg) translateY(3px); }
+.hand .card:nth-child(4) { transform: rotate(9deg) translateY(10px); }
 .card:hover:not(:disabled), .card:focus-visible { transform: translateY(-36px) scale(1.13); z-index: 6; }
 .card.sel { transform: translateY(-30px) scale(1.09); z-index: 5; }
 .card:disabled { cursor: default; filter: grayscale(.7) brightness(.72); }
@@ -304,6 +304,32 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 .card.poor:not(.sel) .face { filter: grayscale(.8) brightness(.45); }
 .card.poor:not(.sel):hover .face, .card.poor:not(.sel):focus-visible .face { filter: grayscale(.6) brightness(.62); }
 .card kbd { position: absolute; right: 9px; top: 7px; z-index: 3; font-family: var(--font-label); font-size: 11px; color: var(--ink-soft); }
+.card.cheap .cost { background: radial-gradient(circle at 35% 30%, #e6ffd0, #5fae3a 55%, #1f5212); }
+
+/* ---------- cards: passives and spells ---------- */
+.cardx.passive { --glow: #b08a2e; --rib-hi: #9a7424; --rib-lo: #5a3e10; }
+.cardx.spell { --glow: #8a55e6; --rib-hi: #6c3fc6; --rib-lo: #35196e; }
+.cardx .art { color: #fff4d8; }
+.cardx .art svg { width: 54%; height: 54%; filter: drop-shadow(0 0 6px color-mix(in srgb, var(--glow) 80%, #fff)) drop-shadow(0 2px 2px rgba(0, 0, 0, .7)); }
+.cardx .kind { margin-top: auto; margin-bottom: 7px; font-family: var(--font-label); font-size: 11.5px; color: var(--ink-soft); }
+.cardx.spell .face { background: linear-gradient(180deg, #efe4ff, #d9c6f2 55%, #bfa6e0); }
+.cardx.spell kbd { color: #4b2f7a; }
+.spells { display: flex; align-items: flex-end; pointer-events: none; padding-top: 34px; padding-bottom: 20px; margin-left: -8px; }
+.spells .card { width: 104px; margin: 0 -5px; }
+.spells .card:nth-child(1) { transform: rotate(-4deg) translateY(6px); }
+.spells .card:nth-child(3) { transform: rotate(4deg) translateY(6px); }
+.spells .card.idle:not(:hover) .face { filter: saturate(.55) brightness(.8); }
+.spells .card .txt { font-size: 10.5px; }
+.spells .card .ribbon { font-size: 12.5px; }
+.spells .card .kind { display: none; }
+.offer { display: flex; justify-content: center; gap: 18px; flex-wrap: wrap; padding: 22px 0 8px; }
+.offer .card.big { width: 158px; margin: 0; }
+.offer .card.big .txt { font-size: 12.5px; }
+.offer .card.big:hover, .offer .card.big:focus-visible { transform: translateY(-10px) scale(1.06); }
+.sign.cardsign { width: min(620px, 100%); }
+.relics { display: flex; gap: 3px; margin-top: 3px; }
+.relic { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 5px; color: var(--gold-3); background: rgba(0, 0, 0, .35); box-shadow: 0 0 0 1px var(--gold-0); }
+.relic svg { width: 13px; height: 13px; }
 
 /* ---------- overlays ---------- */
 .toast {
@@ -342,9 +368,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 @media (max-width: 899px), (max-aspect-ratio: 1/1) {
   .ui {
     gap: 6px; padding-block: 6px 4px;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
-    grid-template-areas: "top top" "party party" "space space" "sel sel" "purse ready" "hand hand";
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto auto auto;
+    grid-template-areas: "top top top" "party party party" "space space space" "sel sel sel" "spells spells spells" "purse . ready" "hand hand hand";
   }
   .topbar { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding-bottom: 0; }
   .plaque { padding: 5px 9px; }
@@ -392,6 +418,17 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
   .card .stats { font-size: 10.5px; gap: 5px; margin-bottom: 5px; }
   .card .cost { width: 30px; height: 30px; font-size: 13.5px; left: -7px; top: -7px; }
   .card kbd { display: none; }
+  .relics { display: none; }
+  .spells { grid-area: spells; justify-self: end; align-self: center; padding: 0; margin: 0; gap: 8px; }
+  .spells .card, .spells .card:nth-child(n) { width: 50px; margin: 0; transform: none; }
+  .spells .card .ribbon, .spells .card .txt, .spells .card .kind, .spells .card .need { display: none; }
+  .spells .card .art { width: 100%; height: 100%; margin: 0; border-radius: 10px; aspect-ratio: auto; }
+  .spells .card .cost { width: 24px; height: 24px; font-size: 11.5px; left: -6px; top: -6px; }
+  .spells .card.sel { transform: translateY(-6px) scale(1.06); }
+  .offer { gap: 8px; padding-top: 14px; }
+  .offer .card.big { width: min(31vw, 132px); }
+  .offer .card.big .txt { display: block; font-size: 10.5px; padding: 3px 5px 0; }
+  .offer .card.big .ribbon { font-size: 12px; }
   .card:hover:not(:disabled), .card:focus-visible { transform: translateY(-18px) scale(1.06); }
   .card.sel { transform: translateY(-16px) scale(1.05); }
   .toast { top: 64px; font-size: 14px; }

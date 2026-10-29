@@ -2,7 +2,7 @@
 import { TOWERS, SYN_BONUS, towerStats } from "../sim/rules.js";
 import { $ } from "./dom.js";
 
-const MODALS = ["synOverlay", "inviteOverlay", "rulesOverlay"];
+const MODALS = ["synOverlay", "inviteOverlay", "rulesOverlay", "cardOverlay"];
 
 /** Closes the top-most open dialog; returns false if none was open. */
 export function closeTopModal() {

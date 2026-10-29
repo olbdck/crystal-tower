@@ -3,6 +3,7 @@
 // not create garbage on every shot. When a pool is empty the effect is skipped.
 import * as THREE from "three";
 import { COLS, ENEMIES, KILL_SHARE } from "../sim/rules.js";
+import { SP } from "../sim/cards.js";
 import { MAT, geo, basic } from "./gfx.js";
 import { renderer, fxRoot } from "./scene.js";
 import { towerObjs } from "./sync.js";
@@ -121,6 +122,15 @@ function debris(x, z, material, n, power) {
   }
 }
 
+function spellFx(x, z, id, r) {
+  if (id === SP.fire) { explosion(x, z, r); ringBurst(x, z, 0xff7a2a, r * 1.3, 520); debris(x, z, MAT.stoneDark, 6, 1.3); }
+  else if (id === SP.storm) ringBurst(x, z, 0x9fe4ff, r, 700);
+  else if (id === SP.quake) { ringBurst(x, z, 0xc08a4a, r, 500); debris(x, z, MAT.stoneDark, 2, 0.7); }
+  else if (id === SP.heal) { ringBurst(x, z, 0x6dff9a, r, 800); ringBurst(x, z, 0xc8ffd8, r * 0.6, 600); }
+  else if (id === SP.surge) { ringBurst(x, z, 0xfff07a, r, 600); ringBurst(x, z, 0xfff07a, r * 0.5, 400); }
+  else if (id === SP.rush) ringBurst(x, z, 0xf1cd6a, r, 800);
+}
+
 const ENEMY_MAT = () => [MAT.shadow, MAT.runner, MAT.armor, MAT.colossus];
 function goldFloat(x, z, amount, h, now) {
   if (amount >= 1 && floats.length < MAX.float) floats.push({ x, z, h, text: "+" + Math.round(amount), start: now });
@@ -140,6 +150,7 @@ export function spawnFx(f) {
     return;
   }
   if (k === 5) { if (S.mySeat >= 0) goldFloat(f[1] / 10, f[2] / 10, f[3], 1.7, now); return; } // the crystal's drip
+  if (k === 6) { spellFx(f[1] / 10, f[2] / 10, f[3], f[4] / 10); return; }
   const x1 = f[1] / 10, z1 = f[2] / 10, x2 = f[3] / 10, z2 = f[4] / 10;
   const to = towerObjs.get(Math.floor(z1) * COLS + Math.floor(x1));
   const top = to ? to.top : 0.35;

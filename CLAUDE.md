@@ -26,14 +26,15 @@ PERF=1 npx playwright test tests/e2e/perf.spec.js   # render benchmark (draw cal
 | Path | Role |
 |---|---|
 | `src/sim/rules.js` | Board, paths, towers, enemies, waves, prices. Pure data and functions. |
-| `src/sim/sim.js` | The deterministic simulation (`Sim`): seats, actions, ticks, combat, `stateHash()`. |
+| `src/sim/sim.js` | The deterministic simulation (`Sim`): seats, actions, ticks, combat, cards, `stateHash()`. |
+| `src/sim/cards.js` | Passive cards and spells: data, stat/price modifiers, the deterministic draw of offers. |
 | `src/net/transport.js` | WebRTC mesh + MQTT: presence (JSON, channel "game") and the game stream (binary, channel "ev"). |
 | `src/net/codec.js` | Binary format: keyframes (full state) and batches of inputs (TICK, ROSTER, ACT, HASH). |
 | `src/net/stream.js` | `Recorder` (host: every Sim change goes through it) and `Follower` (replays batches with a playout buffer). |
 | `src/net/session.js` | Tables, who hosts, keyframe requests, host handover, version check, rejoin, actions queue. |
 | `src/net/view.js` | `getView(now)`: what the renderer and HUD draw, interpolated between ticks. |
 | `src/render/` | Scene, models, instancing (towers/enemies as InstancedMesh), pooled effects, overlay, portraits. |
-| `src/ui/` | HUD, input, join screen, modals. |
+| `src/ui/` | HUD, input, join screen, modals, cards (`ui/cards.js`: the pick dialog, spells in hand, passive icons). |
 | `src/state.js` | Shared runtime state `S` of the tab. |
 | `tests/unit/` | Rules, simulation, stream (host vs copy stays identical), balance. |
 | `tests/e2e/` | Several browser contexts play together through a local aedes broker. |
