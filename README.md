@@ -28,7 +28,7 @@ A tower deals +15% damage for every *other* player whose tower stands on one of 
 
 ## How it works
 
-- The whole game is a single `index.html` file. Three.js and MQTT.js load from a CDN.
+- The game is plain JavaScript modules bundled with Vite; Three.js and MQTT.js come from npm.
 - Players talk directly browser-to-browser over WebRTC data channels (a full mesh, at most 5 players). Typical round trips are tens of milliseconds instead of seconds through a relay.
 - To find each other, players use a public MQTT broker over a secure WebSocket (WSS). The broker carries the connection offers (signaling), keeps a copy of each player's state for whoever joins next, and acts as a slow fallback if a direct channel cannot be made.
 - NAT traversal: Google STUN servers find each player's public address. When a strict NAT (mobile data, some home routers) blocks a direct path, traffic goes through a TURN relay. By default the free shared [Open Relay](https://www.metered.ca/tools/openrelay/) TURN is used.
@@ -64,14 +64,31 @@ brokers: [
 
 Rendering adapts to the device: resolution is capped at 1.5× and lowers itself if the frame rate drops.
 
-## Running locally
+## Development
+
+Requirements: Node.js 22.12 or newer.
 
 ```bash
-python3 -m http.server 8080
+npm install
+npm run dev            # game at http://localhost:5173 with live reload
+npm run dev:broker     # optional: local MQTT broker, then open http://localhost:5173/?broker=ws://127.0.0.1:8888
+npm test               # unit tests, build, end-to-end multiplayer tests
+npm run balance        # bot teams of 1-5 players play full games and report how far they got
 ```
 
-Open `http://localhost:8080` in two tabs and invite yourself with the link.
+Code layout:
 
-## Hosting on GitHub Pages
+| Path | What it holds |
+|---|---|
+| `src/sim/` | Game rules and the simulation. Pure JavaScript, no DOM, tested in Node. |
+| `src/net/` | Network transport (WebRTC + MQTT), the session (tables, host, actions) and the view the UI draws. |
+| `src/render/` | Three.js scene, models, effects, 2D overlay and card portraits. |
+| `src/ui/` | HUD, input, join screen and dialogs. |
+| `src/main.js` | Boot and the frame loop. |
+| `tests/unit/` | `node --test` tests for rules, simulation and balance. |
+| `tests/e2e/` | Playwright tests: several browser tabs play together through a local broker. |
 
-Settings → Pages → *Deploy from a branch* → branch `main`, folder `/ (root)` → Save.
+GitHub Actions runs all tests on every push and pull request, and deploys `main` to GitHub Pages
+(Settings → Pages → Source: **GitHub Actions**).
+
+The sources also run without a build from any static server (`python3 -m http.server`), using the import map in `index.html`.

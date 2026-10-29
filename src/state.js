@@ -1,0 +1,42 @@
+// Shared runtime state of this browser tab. Modules read and write these fields directly;
+// keep it flat, and put anything that only one module needs inside that module instead.
+export const S = {
+  // connection to the table
+  room: null, // current table room (transport API) or the solo stand-in
+  lobby: null, // transport entry point used to join tables
+  soloMode: false, // no network: the tab plays alone
+  roomReady: false, // joined a table's channel and can sit down
+  connected: true, // broker connection is up
+  connectedSince: 0,
+  disconnectedSince: 0,
+  tableName: null, // e.g. "stil-ek3m9q"
+  switching: false, // moving between tables
+  invitedByHash: false, // opened from an invite link or a code
+  netFailed: null, // table name we could not reach
+
+  // who we are
+  myPeer: null, // transport label of this tab
+  myName: "",
+  joined: false, // sat down at the table (otherwise just looking)
+  myPres: {}, // our presence object as last sent
+  peerList: [], // everyone at the table, from the transport
+
+  // game state
+  isHost: false, // this tab runs the simulation
+  sim: null, // the Sim while hosting
+  cur: null, // { peer, e, t } of the state we follow
+  lastState: null, // last full state (for taking over as host)
+  latest: null, // { t, dec, at } decoded state for rendering
+  lastStateAt: 0,
+  rttMs: null, // round trip of our own actions
+  queue: [], // our actions not yet confirmed by the host
+
+  // input
+  hoverCell: -1,
+  armedCell: -1, // touch: first tap arms a cell, second tap builds
+  buildType: -1, // selected tower card
+  selCell: -1, // selected tower on the board
+
+  mySeat: -1, // our seat in the current view, for effects
+  uiDirty: true, // HUD needs a refresh
+};
