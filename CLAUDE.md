@@ -16,7 +16,7 @@ npm run dev:broker   # local MQTT broker; then open http://localhost:5173/?broke
 npm test             # unit tests + build + Playwright e2e (run before every commit)
 npm run test:unit    # node --test, fast
 npm run test:e2e     # needs a build (npm run build) and Chromium
-npm run balance      # bots play full games with 1-5 players
+npm run balance      # seeded bots play full games with 1-5 players (average wave, wins); -- 32 for more games
 npm run netstats     # bytes per second of the game stream
 PERF=1 npx playwright test tests/e2e/perf.spec.js   # render benchmark (draw calls, ms per frame)
 ```

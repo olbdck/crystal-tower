@@ -40,7 +40,7 @@ export function drawOverlay(v, now) {
   for (let i = floats.length - 1; i >= 0; i--) {
     const f = floats[i], t = (now - f.start) / 950;
     if (t >= 1) { floats.splice(i, 1); continue; }
-    const [sx, sy] = proj(f.x, 0.7 + t * 0.9, f.z);
+    const [sx, sy] = proj(f.x, (f.h || 0.7) + t * 0.9, f.z);
     g.globalAlpha = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
     g.font = `400 ${Math.round(Math.max(15, Math.min(24, cp * 0.45)))}px "Yeseva One", Georgia, serif`;
     g.lineWidth = 4; g.strokeStyle = "#1a0d04"; g.strokeText(f.text, sx, sy);

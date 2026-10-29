@@ -15,6 +15,7 @@ The in-game interface is in Ukrainian.
 - You can also just tell friends the table code, shown in the top-left corner. They enter it in the table-code field on the start screen.
 - Up to 5 players per table. Anyone else watches and takes a seat when one frees up.
 - A wave starts when everyone is ready, or after a 20-second break. There are 20 waves; every fifth one brings a boss.
+- Each player has their own gold. A kill pays half its bounty to the owner of the tower that landed it; the other half is shared equally by everyone at the table, so nobody is left without income. During a wave the crystal also gives everyone 1 gold a second, up to half of the wave bonus; the rest of the bonus comes when the wave is cleared.
 
 Keys: `1–4` towers, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
 
@@ -84,7 +85,7 @@ npm install
 npm run dev            # game at http://localhost:5173 with live reload
 npm run dev:broker     # optional: local MQTT broker, then open http://localhost:5173/?broker=ws://127.0.0.1:8888
 npm test               # unit tests, build, end-to-end multiplayer tests
-npm run balance        # bot teams of 1-5 players play full games and report how far they got
+npm run balance        # seeded bot teams of 1-5 players play full games; average wave and wins
 npm run netstats       # how many bytes per second the game stream sends during a game
 ```
 

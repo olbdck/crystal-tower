@@ -3,6 +3,12 @@
 export const COLS = 20, ROWS = 12, MAX_SEATS = 5, MAX_WAVES = 20;
 export const START_GOLD = 160, START_LIVES = 20, BREAK_TIME = 20, GIFT = 25;
 export const MAX_TOWERS = 85, MAX_ENEMIES = 55, STEP = 1 / 30, SYN_BONUS = 0.15, SLOW_FACTOR = 0.5;
+// Gold. A kill pays half its bounty to the owner of the tower that landed it; the other half is shared
+// equally by everyone at the table, so nobody is left without income. During a wave the crystal also
+// pays every seat 1 gold a second, up to half of the wave bonus; the rest comes when the wave is cleared.
+export const KILL_SHARE = 0.5, DRIP_EVERY = 30;
+export function waveBonus(w) { return 20 + 4 * w; }
+export function dripCap(w) { return Math.floor(waveBonus(w) / 2); }
 // A player who drops out keeps their seat, gold and towers this long (in ticks): 3 minutes.
 export const SEAT_GRACE = 30 * 180;
 /** Owner of towers left behind by a player who did not come back: they keep shooting, nobody owns them. */

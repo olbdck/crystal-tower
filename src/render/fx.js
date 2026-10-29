@@ -2,7 +2,7 @@
 // Meshes and effect records come from pools and go back when an effect ends, so a busy wave does
 // not create garbage on every shot. When a pool is empty the effect is skipped.
 import * as THREE from "three";
-import { COLS, ENEMIES } from "../sim/rules.js";
+import { COLS, ENEMIES, KILL_SHARE } from "../sim/rules.js";
 import { MAT, geo, basic } from "./gfx.js";
 import { renderer, fxRoot } from "./scene.js";
 import { towerObjs } from "./sync.js";
@@ -122,18 +122,24 @@ function debris(x, z, material, n, power) {
 }
 
 const ENEMY_MAT = () => [MAT.shadow, MAT.runner, MAT.armor, MAT.colossus];
-/** Plays one effect from the simulation: [kind, x*10, z*10, x*10|type, z*10|killer+1]. */
+function goldFloat(x, z, amount, h, now) {
+  if (amount >= 1 && floats.length < MAX.float) floats.push({ x, z, h, text: "+" + Math.round(amount), start: now });
+}
+
+/** Plays one effect from the simulation (see Sim.fx for the layout). */
 export function spawnFx(f) {
   if (!renderer) return;
   const k = f[0], now = performance.now();
   if (k === 4) {
-    const x = f[1] / 10, z = f[2] / 10, ty = f[3], killer = f[4] - 1;
+    const x = f[1] / 10, z = f[2] / 10, ty = f[3], killer = f[4] - 1, share = (f[5] || 0) / 100;
     if (!ENEMIES[ty]) return;
     debris(x, z, ENEMY_MAT()[ty], ty === 3 ? 12 : 5, ty === 3 ? 1.6 : 1);
     ringBurst(x, z, ty === 3 ? 0xff5030 : 0x9b6dff, ty === 3 ? 1.3 : 0.6, 450);
-    if (killer >= 0 && killer === S.mySeat && floats.length < MAX.float) floats.push({ x, z, text: "+" + ENEMIES[ty].gold, start: now });
+    // our gold from this kill: the killer's half plus a share, or just the share (shown when it is worth a coin)
+    if (S.mySeat >= 0) goldFloat(x, z, killer === S.mySeat ? ENEMIES[ty].gold * (1 - KILL_SHARE) + share : share, 0.7, now);
     return;
   }
+  if (k === 5) { if (S.mySeat >= 0) goldFloat(f[1] / 10, f[2] / 10, f[3], 1.7, now); return; } // the crystal's drip
   const x1 = f[1] / 10, z1 = f[2] / 10, x2 = f[3] / 10, z2 = f[4] / 10;
   const to = towerObjs.get(Math.floor(z1) * COLS + Math.floor(x1));
   const top = to ? to.top : 0.35;

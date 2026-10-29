@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Sim } from "../../src/sim/sim.js";
-import { COLS, BLOCKED, START_GOLD, TOWERS, STEP, upgradeCost, sellValue, synergyAt, waveTotal, waveMix } from "../../src/sim/rules.js";
+import { COLS, BLOCKED, START_GOLD, TOWERS, ENEMIES, PATHS, STEP, DRIP_EVERY, upgradeCost, sellValue, synergyAt, waveTotal, waveMix, waveBonus, dripCap, posAt } from "../../src/sim/rules.js";
 
 const FREE = [...BLOCKED.keys()].filter(c => !BLOCKED[c]);
 function table(n) { const s = new Sim(); s.assignSeats(Array.from({ length: n }, (_, i) => "p" + i)); return s; }
@@ -109,4 +109,53 @@ test("players who are away do not hold back the first wave", () => {
   act(sim, 0, "r", 1);
   sim.step(STEP);
   assert.equal(sim.w, 1);
+});
+
+/** A wave in progress with no more spawns: an enemy with 1 HP right next to a tower of seat 0, one far away. */
+function killSetup(players) {
+  const sim = table(players), cell = 5 * COLS + 4; // next to the first lane
+  act(sim, 0, "b", cell, 0);
+  sim.gold.fill(0);
+  sim.ph = 2; sim.w = 1; sim.sp = 999;
+  const cx = cell % COLS + 0.5, cy = ((cell / COLS) | 0) + 0.5;
+  let d = 0;
+  for (let x = 0; x < PATHS[0].len; x += 0.05) { const p = posAt(0, x), q = posAt(0, d); if ((p[0] - cx) ** 2 + (p[1] - cy) ** 2 < (q[0] - cx) ** 2 + (q[1] - cy) ** 2) d = x; }
+  const enemy = (id, ln, at, hp) => { const p = posAt(ln, at); return { id, ty: 0, ln, d: at, pd: at, hp, sl: 0, x: p[0], y: p[1], dead: false, leak: false, killer: -1 }; };
+  sim.enemies.push(enemy(1, 0, d, 1), enemy(2, 1, 0, 1e6));
+  return sim;
+}
+
+test("a kill pays half to the tower's owner and shares the other half with the table", () => {
+  const sim = killSetup(3), g = ENEMIES[0].gold;
+  sim.step(STEP);
+  assert.equal(sim.enemies.length, 1, "the weak enemy died");
+  assert.equal(sim.gold[0], g / 2 + g / 2 / 3);
+  assert.equal(sim.gold[1], g / 2 / 3);
+  assert.equal(sim.gold[2], g / 2 / 3);
+  assert.equal(sim.kills[0], 1);
+  const solo = killSetup(1);
+  solo.step(STEP);
+  assert.equal(solo.gold[0], g, "alone you keep the whole bounty");
+});
+
+test("shared gold stays in whole cents", () => {
+  const sim = table(5);
+  sim.gold[0] = 0;
+  for (let i = 0; i < 10; i++) sim.addGold(0, 0.3);
+  assert.equal(sim.gold[0], 3);
+});
+
+test("the crystal drips gold during a wave and pays the rest of the bonus at the end", () => {
+  const sim = table(2);
+  act(sim, 0, "r", 1); act(sim, 1, "r", 1);
+  sim.step(STEP);
+  assert.equal(sim.ph, 2);
+  sim.gold.fill(0);
+  for (let i = 0; i < DRIP_EVERY * 5; i++) sim.step(STEP);
+  assert.deepEqual(sim.gold.slice(0, 2), [5, 5], "1 gold a second to everyone");
+  let guard = 0;
+  while (sim.ph === 2 && guard++ < 30 * 300) sim.step(STEP);
+  assert.equal(sim.ph, 1, "the wave ended");
+  assert.ok(dripCap(1) < waveBonus(1));
+  assert.deepEqual(sim.gold.slice(0, 2), [waveBonus(1), waveBonus(1)], "drip plus the rest is the whole bonus");
 });

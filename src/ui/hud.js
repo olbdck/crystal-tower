@@ -145,7 +145,7 @@ export function updateUI(v, now) {
       else { const c = upgradeCost(tw.ty, tw.lv); up.textContent = `Покращити · ${c}`; up.disabled = seat < 0 || (g || 0) < c; }
       sell.textContent = `Продати · ${sellValue(tw.ty, tw.lv)}`;
       sell.disabled = tw.o !== seat;
-      $("selNote").textContent = tw.o === seat ? "" : "Покращення за ваше золото, а нагороди за вбивства йдуть власнику.";
+      $("selNote").textContent = tw.o === seat ? "" : "Покращення за ваше золото. За вбивства половина нагороди йде власнику, решта ділиться між усіма.";
       const sl = $("selSyn"); sl.textContent = "";
       const rel = otherOwners(v.tmap, tw.c, tw.o);
       if (rel.owners.size) {

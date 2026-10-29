@@ -3,7 +3,7 @@
 // stay bit-for-bit equal without sending positions around. Keep it deterministic: no clocks, no
 // Math.random, no engine-dependent maths, and iterate Maps and arrays in insertion order.
 import {
-  BLOCKED, BREAK_TIME, COLS, ENEMIES, GIFT, MAX_ENEMIES, MAX_SEATS, MAX_TOWERS, MAX_WAVES, PATHS, ROWS, SEAT_GRACE, NO_OWNER, SLOW_FACTOR, START_GOLD, START_LIVES, SYN_BONUS, TOWERS, enemyTypeAt, hpScale, posAt, sellValue, spawnInterval, synergyAt, towerStats, upgradeCost, waveTotal,
+  BLOCKED, BREAK_TIME, COLS, CRYSTAL, DRIP_EVERY, ENEMIES, GIFT, KILL_SHARE, dripCap, waveBonus, MAX_ENEMIES, MAX_SEATS, MAX_TOWERS, MAX_WAVES, PATHS, ROWS, SEAT_GRACE, NO_OWNER, SLOW_FACTOR, START_GOLD, START_LIVES, SYN_BONUS, TOWERS, enemyTypeAt, hpScale, posAt, sellValue, spawnInterval, synergyAt, towerStats, upgradeCost, waveTotal,
 } from "./rules.js";
 
 const F64 = new Float64Array(1), W32 = new Uint32Array(F64.buffer);
@@ -16,7 +16,7 @@ export class Sim {
     this.reset(["", "", "", "", ""]);
   }
   reset(seats) {
-    this.ph = 1; this.w = 0; this.l = START_LIVES; this.tm = -1; this.sp = 0; this.sc = 0; this.pc = 1; this.hs = 1;
+    this.ph = 1; this.w = 0; this.l = START_LIVES; this.tm = -1; this.sp = 0; this.sc = 0; this.pc = 1; this.hs = 1; this.wt = 0;
     this.bk = START_GOLD; this.u = 0;
     this.seats = seats.slice();
     this.gold = [0, 0, 0, 0, 0].map(() => START_GOLD);
@@ -117,13 +117,21 @@ export class Sim {
     } else if (this.ph === 2) this.waveTick(dt);
   }
   startWave() {
-    this.w++; this.ph = 2; this.sp = 0; this.sc = 0.5; this.tm = 0;
+    this.w++; this.ph = 2; this.sp = 0; this.sc = 0.5; this.tm = 0; this.wt = 0;
     this.pc = Math.max(1, this.occupied().length);
     this.hs = hpScale(this.w, this.pc);
     this.ready.fill(false);
   }
+  /** Adds gold, kept to whole cents so shared fractions never show up as 49.999... */
+  addGold(i, x) { this.gold[i] = Math.round((this.gold[i] + x) * 100) / 100; }
   waveTick(dt) {
     const total = waveTotal(this.w, this.pc);
+    // the crystal's drip: 1 gold a second to every seat, until half of the wave bonus is paid
+    this.wt++;
+    if (this.wt % DRIP_EVERY === 0 && this.wt / DRIP_EVERY <= dripCap(this.w)) {
+      for (const i of this.occupied()) this.gold[i] += 1;
+      this.fx(5, CRYSTAL.x + 0.5, CRYSTAL.y + 0.5, 1, 0);
+    }
     if (this.sp < total) {
       this.sc -= dt;
       if (this.sc <= 0 && this.enemies.length < MAX_ENEMIES) {
@@ -148,8 +156,11 @@ export class Sim {
     for (const e of this.enemies) {
       if (e.leak) continue;
       if (e.dead) {
-        if (e.killer >= 0) { this.gold[e.killer] += ENEMIES[e.ty].gold; this.kills[e.killer]++; }
-        this.fx(4, e.x, e.y, e.ty, e.killer + 1);
+        // half the bounty to whoever landed the kill, half shared by everyone at the table
+        const g = ENEMIES[e.ty].gold, team = this.present(), share = team.length ? g * KILL_SHARE / team.length : 0;
+        if (e.killer >= 0) { this.addGold(e.killer, g * (1 - KILL_SHARE)); this.kills[e.killer]++; }
+        for (const i of team) this.addGold(i, share);
+        this.fx(4, e.x, e.y, e.ty, e.killer + 1, Math.round(share * 100));
         continue;
       }
       alive.push(e);
@@ -157,8 +168,9 @@ export class Sim {
     this.enemies = alive;
     if (this.l <= 0) { this.l = 0; this.ph = 3; this.enemies = []; return; }
     if (this.sp >= total && !this.enemies.length) {
-      const bonus = 20 + 4 * this.w;
-      for (const i of this.occupied()) this.gold[i] += bonus;
+      // the rest of the wave bonus (the crystal dripped the first part during the wave)
+      const bonus = waveBonus(this.w), dripped = Math.min(dripCap(this.w), Math.floor(this.wt / DRIP_EVERY));
+      for (const i of this.occupied()) this.gold[i] += bonus - dripped;
       this.bk += bonus;
       if (this.w >= MAX_WAVES) this.ph = 4;
       else { this.ph = 1; this.tm = BREAK_TIME; this.ready.fill(false); }
@@ -217,15 +229,20 @@ export class Sim {
       }
     }
   }
-  /** An effect for the renderer: [kind, x*10, z*10, x*10|type, z*10|killer+1]. Never affects the game. */
-  fx(kind, a, b, c, d) {
+  /**
+   * An effect for the renderer. Never affects the game.
+   * Shots 0-3: [kind, x*10, z*10, target x*10, target z*10]; death 4: [4, x*10, z*10, type, killer+1, shared gold*100];
+   * crystal drip 5: [5, x*10, z*10, gold, 0].
+   */
+  fx(kind, a, b, c, d, e = 0) {
     if (!this.onFx) return;
-    this.onFx([kind, Math.round(a * 10), Math.round(b * 10), kind === 4 ? c : Math.round(c * 10), kind === 4 ? d : Math.round(d * 10)]);
+    const raw = kind >= 4;
+    this.onFx([kind, Math.round(a * 10), Math.round(b * 10), raw ? c : Math.round(c * 10), raw ? d : Math.round(d * 10), e]);
   }
   /** A checksum of the whole game state. Copies compare it with the host's to catch any divergence. */
   stateHash() {
     let h = 2166136261 | 0;
-    for (const x of [this.t, this.ph, this.w, this.l, this.tm, this.sp, this.sc, this.pc, this.hs, this.bk, this.u, this.nid]) h = mix(h, x);
+    for (const x of [this.t, this.ph, this.w, this.l, this.tm, this.sp, this.sc, this.pc, this.hs, this.bk, this.u, this.nid, this.wt]) h = mix(h, x);
     for (let i = 0; i < MAX_SEATS; i++) {
       h = mix(h, this.gold[i]); h = mix(h, this.kills[i]); h = mix(h, this.ready[i] ? 1 : 0);
       const st = this.seats[i];

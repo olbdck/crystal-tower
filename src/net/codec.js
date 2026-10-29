@@ -13,7 +13,7 @@ import { BLOCKED, COLS, ENEMIES, MAX_SEATS, MAX_WAVES, NO_OWNER, PATHS, ROWS, TO
 
 export const MSG_KEYFRAME = 1, MSG_BATCH = 2, MSG_REQ = 3, MSG_BUNDLE = 4;
 export const OP_TICK = 1, OP_ROSTER = 2, OP_ACT = 3, OP_HASH = 4;
-const FORMAT = 1;
+const FORMAT = 2; // 2: wave timer for the crystal's gold drip
 const MAX_ROSTER = 32, MAX_LABEL = 24, MAX_ARGS = 3;
 
 const te = new TextEncoder(), td = new TextDecoder();
@@ -81,7 +81,7 @@ export function cleanAction(it) {
 export function encodeKeyframe(sim, { e, seq, build }) {
   const w = new Writer(2048);
   w.u8(MSG_KEYFRAME); w.u8(FORMAT); w.str(build || ""); w.uv(e); w.uv(seq);
-  w.uv(sim.t); w.u8(sim.ph); w.u8(sim.w); w.sv(sim.l); w.f64(sim.tm); w.uv(sim.sp); w.f64(sim.sc);
+  w.uv(sim.t); w.u8(sim.ph); w.u8(sim.w); w.sv(sim.l); w.f64(sim.tm); w.uv(sim.sp); w.f64(sim.sc); w.uv(sim.wt);
   w.u8(sim.pc); w.f64(sim.hs); w.f64(sim.bk); w.u8(sim.u); w.uv(sim.nid);
   let r = 0;
   for (let i = 0; i < MAX_SEATS; i++) if (sim.ready[i]) r |= 1 << i;
@@ -106,7 +106,7 @@ export function decodeKeyframe(bytes) {
   if (r.u8() !== MSG_KEYFRAME || r.u8() !== FORMAT) throw new RangeError("not a keyframe");
   const build = r.str(64), e = r.uv(), seq = r.uv();
   const m = new Sim();
-  m.e = e; m.t = r.uv(); m.ph = r.u8(); m.w = r.u8(); m.l = r.sv(); m.tm = r.f64(); m.sp = r.uv(); m.sc = r.f64();
+  m.e = e; m.t = r.uv(); m.ph = r.u8(); m.w = r.u8(); m.l = r.sv(); m.tm = r.f64(); m.sp = r.uv(); m.sc = r.f64(); m.wt = r.uv();
   m.pc = r.u8(); m.hs = r.f64(); m.bk = r.f64(); m.u = r.u8(); m.nid = r.uv();
   if (![1, 2, 3, 4].includes(m.ph) || m.w > MAX_WAVES || m.pc < 1 || m.pc > MAX_SEATS) throw new RangeError("bad state");
   const rb = r.u8();
