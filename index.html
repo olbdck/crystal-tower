@@ -891,18 +891,13 @@ function makeMqttLobby() {
     onPeers() { return () => {}; },
     presence() { return Promise.resolve(); },
     async join(name) {
-      try { return await joinMqttTable(name, brokerFor(name)); }
-      catch (err) {
-        // a table created in this tab may move to another broker if its first choice is down
-        if (!generatedHere.has(name)) throw err;
-        for (const b of NET_CONFIG.brokers) {
-          if (b === brokerFor(name)) continue;
-          const alt = "stil-" + b.id + name.slice(6);
-          generatedHere.add(alt);
-          try { return await joinMqttTable(alt, b); } catch (_) {}
-        }
-        throw err;
-      }
+      if (!generatedHere.has(name) || NET_CONFIG.brokers.length < 2) return joinMqttTable(name, brokerFor(name));
+      // a new table goes to whichever broker answers first from here: usually the closest, and a dead one is skipped
+      const rest = name.slice(6);
+      const tries = NET_CONFIG.brokers.map(b => { const n = "stil-" + b.id + rest; generatedHere.add(n); return joinMqttTable(n, b); });
+      const winner = await Promise.any(tries);
+      for (const t of tries) t.then(api => { if (api !== winner) api.leave(); }, () => {});
+      return winner;
     },
   };
 }
@@ -946,7 +941,7 @@ function joinMqttTable(name, broker) {
     for (const k in patch) { if (patch[k] === null) delete np[k]; else np[k] = patch[k]; }
     pres = Object.freeze(np);
     notify();
-    if (!flushTimer) flushTimer = setTimeout(flush, 30);
+    if (!flushTimer) flushTimer = setTimeout(flush, 15);
     return Promise.resolve();
   }
 
@@ -1025,11 +1020,14 @@ function joinMqttTable(name, broker) {
 }
 
 /* ===================== NETWORK ===================== */
-const STEP_MS = STEP * 1000, INTERP_TICKS = 5, PRESENCE_BUDGET = 3800;
+const STEP_MS = STEP * 1000, PRESENCE_BUDGET = 3800, PUBLISH_MS = 100, HOST_STALE_MS = 3500;
+const isCoarse = (() => { try { return matchMedia("(pointer: coarse)").matches; } catch (_) { return false; } })();
 let room = null, soloMode = false, roomReady = false, connected = true, disconnectedSince = 0;
 let myPeer = null, joined = false, myName = "";
 let isHost = false, sim = null, hostTimer = null, hostAcc = 0, lastHostTime = 0, lastPublish = 0;
-let cur = null, lastState = null, snaps = [], offsetEst = null;
+let cur = null, lastState = null, latest = null, lastStateAt = 0, connectedSince = 0, rttMs = null, tickWorker = null;
+const corr = new Map(), sentAt = new Map();
+function joinPresence() { return { n: myName, j: Date.now(), hid: document.hidden ? 1 : null, mob: isCoarse ? 1 : null }; }
 let queue = [], seq = Math.floor(Date.now() / 10) % 1e11, myPres = {};
 let peerList = [];
 const seenS = new Map();
@@ -1103,16 +1101,25 @@ function decodeState(s) {
 }
 
 function acceptState(peer, s) {
-  const isNewEpoch = !cur || cur.e !== s.e;
+  const isNewEpoch = !cur || cur.e !== s.e, hostChanged = !!cur && cur.peer !== peer;
+  const now = performance.now();
+  const before = latest ? predictEnemies(latest, now) : null;
   cur = { peer, e: s.e, t: s.t };
-  lastState = s;
-  const now = performance.now(), off = now - s.t * STEP_MS;
-  if (offsetEst === null || Math.abs(off - offsetEst) > 600) offsetEst = off;
-  else offsetEst = offsetEst * 0.92 + off * 0.08;
-  if (snaps.length && snaps[snaps.length - 1].t >= s.t) snaps = [];
-  snaps.push({ t: s.t, dec: decodeState(s) });
-  if (snaps.length > 8) snaps.shift();
-  if (Array.isArray(s.F)) for (let i = 0; i + 4 < s.F.length; i += 5) fxPending.push({ at: s.t - 2, f: s.F.slice(i, i + 5) });
+  lastState = s; lastStateAt = now;
+  latest = { t: s.t, dec: decodeState(s), at: now };
+  // what we were showing vs. what the new snapshot says: keep the difference and let it fade, so nothing jumps
+  if (before) {
+    for (const [id, pnew] of predictEnemies(latest, now)) {
+      const pold = before.get(id);
+      if (pold && pold.ln === pnew.ln) {
+        const off = pold.d + (corr.has(id) ? corrOffset(id, now) : 0) - pnew.d;
+        if (Math.abs(off) < 1.5) corr.set(id, { off, at: now }); else corr.delete(id);
+      }
+    }
+    if (corr.size > 150) for (const [id, c] of corr) if (now - c.at > 1000) corr.delete(id);
+  }
+  if (hostChanged && joined) toast(`Гру тепер веде ${nameOfPeer(peer)}`);
+  if (Array.isArray(s.F)) for (let i = 0; i + 4 < s.F.length; i += 5) fxPending.push({ at: s.t, f: s.F.slice(i, i + 5) });
   if (fxPending.length > 120) fxPending.splice(0, fxPending.length - 120);
   handleAck(s.ak);
   if (isNewEpoch) uiDirty = true;
@@ -1123,7 +1130,9 @@ function handleAck(ak) {
   let x = null;
   for (let i = 0; i + 1 < ak.length; i += 2) if (ak[i] === myPeer) { x = ak[i + 1]; break; }
   if (x == null) return;
-  const before = queue.length;
+  const before = queue.length, now = performance.now();
+  for (const q of queue) if (q[0] <= x && sentAt.has(q[0])) { const rtt = now - sentAt.get(q[0]); rttMs = rttMs === null ? rtt : rttMs * 0.7 + rtt * 0.3; }
+  for (const k of [...sentAt.keys()]) if (k <= x) sentAt.delete(k);
   queue = queue.filter(q => q[0] > x);
   if (queue.length !== before) setPresence({ a: queue.length ? queue : null });
 }
@@ -1141,6 +1150,7 @@ function onPeersChange(ch) {
     acceptState(p.peer, s);
   }
   for (const p of ch.left || []) seenS.delete(p.peer);
+  if (isHost && sim) { const n = processActions(ch.peers); if (n) { const now = performance.now(); if (now - lastPublish >= 30) publish(now); } }
   decideHost();
   uiDirty = true;
 }
@@ -1149,22 +1159,36 @@ function onRoomError(err) {
   if (err && TERMINAL.has(err.code) && !soloMode) goSolo("Кімната недоступна в цьому перегляді, граємо соло");
 }
 
+// Who runs the game. The current host keeps the job for as long as its state keeps arriving, even if its tab
+// is in the background (the simulation ticks from a worker, which browsers do not throttle). Only when the host
+// leaves, or its state stops for HOST_STALE_MS, the next player takes over: visible tabs first, then desktops
+// before phones, then whoever joined earliest.
+const hostRank = p => (p.presence.hid ? 2 : 0) + (p.presence.mob ? 1 : 0);
 function decideHost() {
   if (!room || !myPeer) return;
   if (!joined) { if (isHost) stepDown(true); return; }
+  if (isHost) return;
+  const now = performance.now();
   const live = joinedPeers(peerList);
-  let host = null;
-  if (cur) {
-    const pub = live.find(p => p.peer === cur.peer && p.presence.s);
-    if (pub && !pub.presence.hid) host = pub.peer;
-  }
-  if (!host) {
-    const vis = live.filter(p => !p.presence.hid);
-    const pool = vis.length ? vis : live;
-    host = pool.length ? pool[0].peer : null;
-  }
-  if (host === myPeer && !isHost) becomeHost();
-  else if (host !== myPeer && isHost) stepDown(true);
+  const hostPeer = cur ? live.find(p => p.peer === cur.peer && p.presence.s) : null;
+  if (hostPeer && now - lastStateAt < HOST_STALE_MS) return;
+  // the host looks silent: make sure it is not our own connection that dropped
+  if (hostPeer && (!connected || !connectedSince || now - connectedSince < 5000)) return;
+  const pool = live.filter(p => p !== hostPeer).sort((a, b) => hostRank(a) - hostRank(b) || byJ(a, b));
+  if (pool.length && pool[0].peer === myPeer) becomeHost();
+}
+function startTicker() {
+  stopTicker();
+  try {
+    const src = "let t=0;onmessage=e=>{clearInterval(t);if(e.data>0)t=setInterval(()=>postMessage(0),e.data);};";
+    tickWorker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    tickWorker.onmessage = hostLoop;
+    tickWorker.postMessage(33);
+  } catch (_) { tickWorker = null; hostTimer = setInterval(hostLoop, 33); }
+}
+function stopTicker() {
+  if (tickWorker) { try { tickWorker.terminate(); } catch (_) {} tickWorker = null; }
+  if (hostTimer) { clearInterval(hostTimer); hostTimer = null; }
 }
 
 function becomeHost() {
@@ -1173,7 +1197,8 @@ function becomeHost() {
   sim.e = (cur ? cur.e : 0) + 1;
   sim.onFx = f => onSimFx(f);
   hostAcc = 0; lastHostTime = performance.now(); lastPublish = 0;
-  hostTimer = setInterval(hostLoop, 33);
+  if (cur && cur.peer !== myPeer && joined) toast("Тепер гру ведете ви");
+  startTicker();
   hostLoop();
   uiDirty = true;
 }
@@ -1181,12 +1206,12 @@ function becomeHost() {
 function stepDown(clearPresence) {
   if (!isHost) return;
   isHost = false;
-  clearInterval(hostTimer); hostTimer = null;
+  stopTicker();
   if (sim) {
     const s = sim.serialize();
     lastState = s;
-    snaps = [{ t: s.t, dec: decodeState(s) }];
-    offsetEst = performance.now() - s.t * STEP_MS + INTERP_TICKS * STEP_MS;
+    latest = { t: s.t, dec: decodeState(s), at: performance.now() };
+    corr.clear();
   }
   sim = null;
   if (clearPresence) setPresence({ s: null });
@@ -1199,14 +1224,15 @@ function hostLoop() {
   hostAcc += Math.min(now - lastHostTime, 3000); lastHostTime = now;
   const list = room.peers();
   sim.assignSeats(joinedPeers(list).map(p => p.peer));
-  processActions(list);
+  const applied = processActions(list);
   let n = 0;
   while (hostAcc >= STEP_MS && n < 90) { sim.step(STEP); hostAcc -= STEP_MS; n++; }
   if (hostAcc >= STEP_MS) hostAcc = 0;
-  if (now - lastPublish >= 100) publish(now);
+  if (now - lastPublish >= PUBLISH_MS || (applied && now - lastPublish >= 30)) publish(now);
 }
 
 function processActions(list) {
+  let applied = 0;
   for (const p of list) {
     if (p.kind !== "viewer") continue;
     const a = p.presence && p.presence.a;
@@ -1214,9 +1240,10 @@ function processActions(list) {
     const seat = sim.seats.indexOf(p.peer);
     let last = sim.ak.get(p.peer) || 0;
     const items = a.filter(x => Array.isArray(x) && Number.isInteger(x[0]) && x[0] > last).sort((x, y) => x[0] - y[0]);
-    for (const it of items) { if (seat >= 0) sim.apply(seat, it); last = it[0]; }
+    for (const it of items) { if (seat >= 0) sim.apply(seat, it); last = it[0]; applied++; }
     if (items.length) sim.ak.set(p.peer, last);
   }
+  return applied;
 }
 
 const enc = new TextEncoder();
@@ -1239,6 +1266,7 @@ function act(code, a1, a2) {
   if (a1 !== undefined) it.push(a1);
   if (a2 !== undefined) it.push(a2);
   queue.push(it);
+  sentAt.set(seq, performance.now());
   if (queue.length > 16) queue.shift();
   setPresence({ a: queue });
 }
@@ -1298,10 +1326,10 @@ async function enterTable(name) {
   if (!lobby || soloMode) return;
   if (switching) { pendingTable = name; return; }
   switching = true; roomReady = false; uiDirty = true;
-  if (isHost) { clearInterval(hostTimer); hostTimer = null; isHost = false; sim = null; }
+  if (isHost) { stopTicker(); isHost = false; sim = null; }
   const old = room; room = null;
   if (old && old !== lobby && typeof old.leave === "function") { try { await old.leave(); } catch (_) {} }
-  cur = null; lastState = null; snaps = []; offsetEst = null; seenS.clear(); queue = []; peerList = []; fxPending = []; myPres = {};
+  cur = null; lastState = null; latest = null; corr.clear(); sentAt.clear(); rttMs = null; seenS.clear(); queue = []; peerList = []; fxPending = []; myPres = {};
   selCell = -1; buildType = -1; armedCell = -1;
   let t = null;
   try { t = await lobby.join(name); } catch (_) { t = null; }
@@ -1318,7 +1346,7 @@ async function enterTable(name) {
   if (hashTable() !== tableName) { try { location.hash = tableName; } catch (_) {} }
   attachRoom(t, onTableError);
   roomReady = true;
-  if (joined) setPresence({ n: myName, j: Date.now(), hid: document.hidden ? 1 : null });
+  if (joined) setPresence(joinPresence());
   advertise(0);
   updateJoinCard(); uiDirty = true;
   runPendingTable();
@@ -1331,12 +1359,14 @@ function attachRoom(r, onErr) {
     connected = c;
     if (!c && !disconnectedSince) disconnectedSince = performance.now();
     if (c) disconnectedSince = 0;
+    if (c && !connectedSince) connectedSince = performance.now();
+    if (!c) connectedSince = 0;
     uiDirty = true;
   }, onErr || onRoomError);
 }
 
 function goSolo(reason) {
-  if (isHost) { clearInterval(hostTimer); hostTimer = null; if (sim) lastState = sim.serialize(); isHost = false; sim = null; }
+  if (isHost) { stopTicker(); if (sim) lastState = sim.serialize(); isHost = false; sim = null; }
   const old = room;
   if (old && old !== lobby && typeof old.leave === "function") { try { const pr = old.leave(); if (pr && pr.catch) pr.catch(() => {}); } catch (_) {} }
   soloMode = true; cur = null; seenS.clear(); myPeer = "solo"; queue = []; peerList = []; myPres = {}; tableName = null;
@@ -1376,21 +1406,31 @@ function getView(now) {
       kills: sim.kills, ready: sim.ready, towers, tmap: sim.towers, enemies, syn: sim.syn, t: sim.t, rt: sim.t,
     };
   }
-  if (!snaps.length) return null;
-  const last = snaps[snaps.length - 1];
-  const rt = offsetEst === null ? last.t : (now - offsetEst) / STEP_MS - INTERP_TICKS;
-  let a = null, b = null;
-  for (let i = 1; i < snaps.length; i++) if (snaps[i - 1].t <= rt && rt <= snaps[i].t) { a = snaps[i - 1]; b = snaps[i]; break; }
-  if (!b) b = rt < snaps[0].t ? snaps[0] : last;
-  const alpha = a ? Math.max(0, Math.min(1, (rt - a.t) / Math.max(1, b.t - a.t))) : 1;
+  if (!latest) return null;
+  const el = Math.min(0.6, Math.max(0, (now - latest.at) / 1000));
   const enemies = [];
-  for (const e of b.dec.enemies) {
-    const pe = a && a.dec.emap.get(e.id);
-    const d = pe && pe.ln === e.ln ? pe.d + (e.d - pe.d) * alpha : e.d;
-    const p = posAt(e.ln, d);
-    enemies.push({ id: e.id, ty: e.ty, ln: e.ln, d, x: p[0], y: p[1], hp: e.hp, mhp: e.mhp, sl: e.sl });
+  for (const [id, p] of predictEnemies(latest, now)) {
+    const d = p.d + (corr.has(id) ? corrOffset(id, now) : 0), e = p.e, pos = posAt(p.ln, d);
+    enemies.push({ id, ty: e.ty, ln: e.ln, d, x: pos[0], y: pos[1], hp: e.hp, mhp: e.mhp, sl: Math.max(0, e.sl - el) });
   }
-  return { ...last.dec, enemies, rt };
+  return { ...latest.dec, enemies, rt: latest.t + el * 30 };
+}
+// Enemies walk fixed paths at known speeds, so between updates each client moves them forward itself.
+function predictEnemies(snap, now) {
+  const el = Math.min(0.6, Math.max(0, (now - snap.at) / 1000)), out = new Map();
+  for (const e of snap.dec.enemies) {
+    const slowT = Math.min(el, Math.max(0, e.sl));
+    const d = Math.min(PATHS[e.ln].len, e.d + ENEMIES[e.ty].speed * (slowT * SLOW_FACTOR + (el - slowT)));
+    out.set(e.id, { ln: e.ln, d, e });
+  }
+  return out;
+}
+function corrOffset(id, now) {
+  const c = corr.get(id);
+  if (!c) return 0;
+  const k = Math.exp(-(now - c.at) / 140);
+  if (k < 0.02) { corr.delete(id); return 0; }
+  return c.off * k;
 }
 
 
@@ -2485,7 +2525,7 @@ function doJoin() {
   myName = n;
   try { localStorage.setItem("kv-nick", n); } catch (_) {}
   joined = true;
-  setPresence({ n, j: Date.now(), hid: document.hidden ? 1 : null });
+  setPresence(joinPresence());
   $("joinOverlay").hidden = true;
   setTimeout(decideHost, 60);
   advertise(lastState ? lastState.w : 0);
@@ -2558,7 +2598,7 @@ function updateUI(v, now) {
   const seatedCount = v ? v.seats.filter(Boolean).length : 0;
   const lost = !soloMode && roomReady && !connected && disconnectedSince && now - disconnectedSince > 2000;
   $("net").className = "net " + (soloMode ? "" : lost ? "warn" : roomReady ? "on" : "");
-  $("netText").textContent = !roomReady ? "Підключення…" : soloMode ? "Соло" : lost ? "Відновлюємо зв’язок…" : isNarrow() ? `${seatedCount}/${MAX_SEATS}` : `Онлайн · ${seatedCount} з ${MAX_SEATS} · стіл`;
+  $("netText").textContent = !roomReady ? "Підключення…" : soloMode ? "Соло" : lost ? "Відновлюємо зв’язок…" : isNarrow() ? `${seatedCount}/${MAX_SEATS}` + (isHost ? " · хост" : rttMs !== null ? ` · ${Math.round(rttMs)} мс` : "") : `Онлайн · ${seatedCount} з ${MAX_SEATS}` + (isHost ? " · ви ведете гру" : rttMs !== null ? ` · відгук ${Math.round(rttMs)} мс` : "") + " · стіл";
   const showCode = !soloMode && roomReady && !!tableName;
   $("codeBtn").hidden = !showCode;
   if (showCode) $("codeTxt").textContent = tableName.slice(5).toUpperCase();

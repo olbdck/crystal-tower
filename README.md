@@ -23,7 +23,9 @@ Keys: `1–4` towers, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
 - The whole game is a single `index.html` file. Three.js and MQTT.js load from a CDN.
 - Players exchange game state through a public MQTT broker over a secure WebSocket (WSS). Because nothing connects browser-to-browser, it works from any network, including mobile data and strict home routers.
 - The first letter of the table code tells which broker the table uses (`e` = EMQX, `h` = HiveMQ, `m` = Mosquitto). If the first broker is down when a table is created, the next one is used automatically.
-- One player's browser runs the simulation. If that player leaves, another takes over and the game continues.
+- One player's browser (the host) runs the simulation and sends a snapshot about 10 times a second. The host keeps the job even when its tab is in the background, because the simulation ticks from a Web Worker. If the host leaves or its updates stop for 3.5 seconds, the next player takes over (visible tabs and desktops are preferred over phones) and the game continues.
+- Between snapshots every client moves enemies forward on its own (they walk fixed paths at known speeds), and small corrections are blended in, so movement stays smooth even when the network is uneven.
+- Actions such as building are applied by the host as soon as they arrive and confirmed in the next snapshot. The top-left plaque shows this round trip in milliseconds.
 - A player who drops out briefly or reloads the tab keeps their seat and gold for 10 seconds.
 - When everyone leaves a table, it disappears.
 
