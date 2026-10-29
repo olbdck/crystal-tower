@@ -3,96 +3,100 @@
 import * as THREE from "three";
 import { COLS, ROWS, CRYSTAL, START_LIVES, TOWERS, ENEMIES, BLOCKED, SLOW_FACTOR, posAt, towerStats } from "../sim/rules.js";
 import { MAT, SEAT_HEX, col, geo, part, mergeGeos } from "./gfx.js";
-import { towerModel, enemyModel } from "./models.js";
-import { scene, towerRoot, enemyRoot, synRoot, cursorRoot, crystal, decor } from "./scene.js";
+import { towerModel } from "./models.js";
+import { placeTower, removeTower, towerTop, updateTowerInstances, updateEnemyInstances, ENEMY_HEIGHT } from "./instancing.js";
+import { scene, synRoot, cursorRoot, crystal, decor } from "./scene.js";
 import { ringBurst } from "./fx.js";
 import { lifeHit } from "../ui/dom.js";
 import { mySeat, myGold, canBuildAt } from "../game.js";
 import { S } from "../state.js";
 
-export const towerObjs = new Map(), enemyObjs = new Map();
+// Per-tower and per-enemy data the effects and the overlay read (no meshes: those are instanced).
+export const towerObjs = new Map(); // cell -> { ty, lv, o, born, aim, aimT, top, bucket }
+export const enemyObjs = new Map(); // id -> { e, x, z, h, ty, phase, yaw }
 export let synKey = "", synHint = null;
 let livesShown = null, crystalHitAt = -1e9, worldReady = false, shadowDirty = true, lastTurretShadow = 0;
 export function markWorldReady() { worldReady = true; }
 /** True once after anything that casts a shadow moved; the shadow map is redrawn only then. */
 export function takeShadowDirty() { const d = shadowDirty; shadowDirty = false; return d; }
 export function clearBoard() {
-  for (const [c, o] of towerObjs) { towerRoot.remove(o.g); towerObjs.delete(c); }
-  for (const [id, o] of enemyObjs) { enemyRoot.remove(o.g); enemyObjs.delete(id); }
+  for (const [c, o] of towerObjs) { removeTower(o.bucket, c); towerObjs.delete(c); }
+  enemyObjs.clear();
+  updateTowerInstances(performance.now(), towerInfo);
+  updateEnemyInstances([]);
 }
 const easeOutBack = t => { const c1 = 1.7, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
 function angLerp(a, b, t) { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return a + d * t; }
+const burstAt = (c, hex, r, life) => ringBurst(c % COLS + 0.5, ((c / COLS) | 0) + 0.5, hex, r, life);
+
+let frameNow = 0;
+const info = { x: 0, z: 0, scale: 1, aim: 0, phase: 0 };
+function towerInfo(c) {
+  const o = towerObjs.get(c), age = (frameNow - o.born) / 1000;
+  info.x = c % COLS + 0.5; info.z = ((c / COLS) | 0) + 0.5;
+  info.scale = age < 0.35 ? Math.max(0.01, easeOutBack(age / 0.35)) : 1;
+  info.aim = o.aim; info.phase = c * 1.7;
+  return info;
+}
 
 export function syncTowers(v, now, dt) {
+  frameNow = now;
   const seen = new Set();
   for (const tw of v.towers) {
     seen.add(tw.c);
     let o = towerObjs.get(tw.c);
     if (o && (o.ty !== tw.ty || o.lv !== tw.lv || o.o !== tw.o)) {
-      towerRoot.remove(o.g);
-      const aim = o.aim; o = null;
-      const g = makeTowerObj(tw, now); g.aim = aim; g.aimT = aim; g.born = now - 120;
-      o = g;
-      ringBurst(new THREE.Vector3(tw.c % COLS + 0.5, 0.05, ((tw.c / COLS) | 0) + 0.5), 0xf1cd6a, 0.7, 420);
+      const levelled = o.ty === tw.ty && o.lv !== tw.lv;
+      o.bucket = placeTower(tw.c, tw.ty, tw.lv, tw.o, o.bucket);
+      Object.assign(o, { ty: tw.ty, lv: tw.lv, o: tw.o, top: towerTop(tw.ty, tw.lv) });
+      if (levelled) { o.born = now - 120; burstAt(tw.c, 0xf1cd6a, 0.7, 420); }
+      shadowDirty = true;
     }
-    if (!o) { o = makeTowerObj(tw, now); if (worldReady) ringBurst(new THREE.Vector3(tw.c % COLS + 0.5, 0.05, ((tw.c / COLS) | 0) + 0.5), 0xe3cfa2, 0.6, 380); }
-    const age = (now - o.born) / 1000;
-    if (age < 0.45) { o.g.scale.setScalar(age < 0.35 ? Math.max(0.01, easeOutBack(age / 0.35)) : 1); shadowDirty = true; }
-    else if (o.g.scale.x !== 1) { o.g.scale.setScalar(1); shadowDirty = true; }
-    const ud = o.g.userData, ph = tw.c * 1.7;
-    if (ud.turret) {
+    if (!o) {
+      o = { ty: tw.ty, lv: tw.lv, o: tw.o, born: worldReady ? now : now - 1000, aim: 0, aimT: 0, top: towerTop(tw.ty, tw.lv) };
+      o.bucket = placeTower(tw.c, tw.ty, tw.lv, tw.o, null);
+      towerObjs.set(tw.c, o);
+      shadowDirty = true;
+      if (worldReady) burstAt(tw.c, 0xe3cfa2, 0.6, 380);
+    }
+    if (now - o.born < 450) shadowDirty = true;
+    if (o.ty === 1) {
       const moving = Math.abs(o.aimT - o.aim) > 0.04;
-      o.aim = angLerp(o.aim, o.aimT, Math.min(1, dt * 9)); ud.turret.rotation.y = o.aim;
+      o.aim = angLerp(o.aim, o.aimT, Math.min(1, dt * 9));
       if (moving && now - lastTurretShadow > 250) { lastTurretShadow = now; shadowDirty = true; }
     }
-    if (ud.crystal) {
-      ud.crystal.rotation.y = now * 0.0012 + ph;
-      ud.crystal.position.y = ud.crystalY + Math.sin(now * 0.002 + ph) * 0.04;
-      ud.shards.forEach((s, i) => { const a = now * 0.002 + ph + i * Math.PI; s.position.set(Math.cos(a) * 0.24, ud.crystalY + Math.sin(a * 1.3) * 0.05, Math.sin(a) * 0.24); s.rotation.y = a; });
-    }
-    if (ud.orb) ud.orb.scale.setScalar(1 + Math.sin(now * 0.008 + ph) * 0.12);
-    if (ud.flag) ud.flag.rotation.y = Math.sin(now * 0.004 + ph) * 0.35;
   }
   for (const [c, o] of towerObjs) if (!seen.has(c)) {
-    towerRoot.remove(o.g); towerObjs.delete(c); shadowDirty = true;
-    ringBurst(new THREE.Vector3(c % COLS + 0.5, 0.05, ((c / COLS) | 0) + 0.5), 0x9b8a70, 0.7, 380);
+    removeTower(o.bucket, c); towerObjs.delete(c); shadowDirty = true;
+    burstAt(c, 0x9b8a70, 0.7, 380);
   }
-}
-function makeTowerObj(tw, now) {
-  const g = towerModel(tw.ty, tw.lv, MAT.seat[tw.o] || MAT.neutral);
-  g.position.set(tw.c % COLS + 0.5, 0, ((tw.c / COLS) | 0) + 0.5);
-  g.userData.cell = tw.c;
-  towerRoot.add(g);
-  shadowDirty = true;
-  const o = { g, ty: tw.ty, lv: tw.lv, o: tw.o, born: worldReady ? now : now - 1000, aim: 0, aimT: 0 };
-  towerObjs.set(tw.c, o);
-  return o;
+  updateTowerInstances(now, towerInfo);
 }
 
+const enemyList = [];
 export function syncEnemies(v, now) {
   const seen = new Set();
+  enemyList.length = 0;
   for (const e of v.enemies) {
     seen.add(e.id);
     let o = enemyObjs.get(e.id);
     if (!o || o.ty !== e.ty) {
-      if (o) enemyRoot.remove(o.g);
-      const g = enemyModel(e.ty);
-      enemyRoot.add(g);
-      o = { g, ty: e.ty, phase: (e.id * 2.39) % 6.28, yaw: null };
+      o = { ty: e.ty, phase: (e.id * 2.39) % 6.28, yaw: null, h: ENEMY_HEIGHT[e.ty], it: { id: e.id, ty: e.ty } };
       enemyObjs.set(e.id, o);
     }
     const p2 = posAt(e.ln, e.d + 0.08), yaw = Math.atan2(p2[0] - e.x, p2[1] - e.y);
     o.yaw = o.yaw === null ? yaw : angLerp(o.yaw, yaw, 0.25);
-    o.g.position.set(e.x, 0, e.y);
-    o.g.rotation.y = o.yaw;
-    const spd = ENEMIES[e.ty].speed * (e.sl > 0 ? SLOW_FACTOR : 1), ph = now * 0.001 * spd * 8 + o.phase, body = o.g.userData.body;
-    body.position.y = Math.abs(Math.sin(ph)) * (e.ty === 3 ? 0.03 : 0.06);
-    body.rotation.z = Math.sin(ph) * (e.ty === 1 ? 0.04 : 0.09);
-    if (e.ty === 3) body.rotation.y = Math.sin(now * 0.0008) * 0.3;
-    o.g.userData.frost.visible = e.sl > 0;
-    o.e = e;
+    o.x = e.x; o.z = e.y; o.e = e;
+    const spd = ENEMIES[e.ty].speed * (e.sl > 0 ? SLOW_FACTOR : 1), ph = now * 0.001 * spd * 8 + o.phase, it = o.it;
+    it.x = e.x; it.z = e.y; it.yaw = o.yaw;
+    it.bob = Math.abs(Math.sin(ph)) * (e.ty === 3 ? 0.03 : 0.06);
+    it.tilt = Math.sin(ph) * (e.ty === 1 ? 0.04 : 0.09);
+    it.wobble = e.ty === 3 ? Math.sin(now * 0.0008) * 0.3 : 0;
+    it.slowed = e.sl > 0;
+    enemyList.push(it);
   }
-  for (const [id, o] of enemyObjs) if (!seen.has(id)) { enemyRoot.remove(o.g); enemyObjs.delete(id); }
+  for (const id of enemyObjs.keys()) if (!seen.has(id)) enemyObjs.delete(id);
+  updateEnemyInstances(enemyList);
 }
 
 export function syncSynergy(v) {

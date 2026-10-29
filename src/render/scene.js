@@ -8,6 +8,7 @@ import { woodTexture, boardTexture } from "./textures.js";
 import { syncTowers, syncEnemies, syncSynergy, updateCrystal, updateCursor, animateDecor, clearBoard, markWorldReady, takeShadowDirty } from "./sync.js";
 import { updateFx } from "./fx.js";
 import { drawOverlay } from "./overlay.js";
+import { initTowerInstancing, initEnemyInstancing, pickTower } from "./instancing.js";
 
 const $ = id => document.getElementById(id);
 export const stage = $("stage"), glCanvas = $("gl"), ov = $("ov"), octx = ov.getContext("2d");
@@ -100,6 +101,8 @@ function buildWorld() {
 
   towerRoot = new THREE.Group(); enemyRoot = new THREE.Group(); fxRoot = new THREE.Group(); synRoot = new THREE.Group(); cursorRoot = new THREE.Group();
   scene.add(towerRoot, enemyRoot, fxRoot, synRoot, cursorRoot);
+  initTowerInstancing(towerRoot);
+  initEnemyInstancing(enemyRoot);
 
   // cursor helpers
   decor.hoverTile = part(cursorRoot, new THREE.PlaneGeometry(0.94, 0.94), basic(0xffffff, { op: 0.35 }), 0, 0.012, 0, { rx: -Math.PI / 2, noShadow: true });
@@ -198,8 +201,8 @@ export function pickCell(clientX, clientY) {
   const r = glCanvas.getBoundingClientRect();
   const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
-  const hits = raycaster.intersectObjects(towerRoot.children, true);
-  for (const h of hits) { let o = h.object; while (o && o.userData.cell === undefined) o = o.parent; if (o) return o.userData.cell; }
+  const towerCell = pickTower(raycaster);
+  if (towerCell >= 0) return towerCell;
   const p = new THREE.Vector3();
   if (!raycaster.ray.intersectPlane(groundPlane, p)) return -1;
   const x = Math.floor(p.x), z = Math.floor(p.z);

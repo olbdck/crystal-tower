@@ -40,6 +40,7 @@ export function initMaterials() {
   MAT.eye = basic(0xff4a2e, { t: false, dw: true });
   MAT.visor = basic(0xffa23a, { t: false, dw: true });
   MAT.seat = SEAT_HEX.map(h => std(h, { r: 0.55 }));
+  MAT.seatBase = std(0xffffff, { r: 0.55 }); // instanced towers: tinted per copy with the owner's colour
   MAT.neutral = std(0xc0954a, { r: 0.55, m: 0.3 });
   MAT.crystal = std(0xb393ff, { r: 0.1, m: 0.1, e: 0x6a3be0, ei: 0.95, t: true, op: 0.94, flat: true });
   MAT.portal = basic(0x9b5cff, { op: 0.75, add: true, ds: true });

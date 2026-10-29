@@ -1,4 +1,6 @@
 // Short-lived effects: projectiles, bursts, explosions, debris, lightning and floating gold.
+// Meshes and effect records come from pools and go back when an effect ends, so a busy wave does
+// not create garbage on every shot. When a pool is empty the effect is skipped.
 import * as THREE from "three";
 import { COLS, ENEMIES } from "../sim/rules.js";
 import { MAT, geo, basic } from "./gfx.js";
@@ -6,61 +8,121 @@ import { renderer, fxRoot } from "./scene.js";
 import { towerObjs } from "./sync.js";
 import { S } from "../state.js";
 
-const fxObjs = [];
-export const bolts = [], floats = [];
-function addTemp(mesh, life, update, onEnd) { fxRoot.add(mesh); fxObjs.push({ mesh, start: performance.now(), life, update, onEnd }); }
+export const bolts = [], floats = []; // drawn by the 2D overlay
+
+const MAX = { arrow: 90, ball: 40, iceShard: 60, ring: 70, sphere: 30, debris: 160, bolt: 40, float: 30 };
+const pools = {}, made = {};
+function makeMesh(kind) {
+  switch (kind) {
+    case "arrow": return new THREE.Mesh(geo("arrow", () => new THREE.BoxGeometry(0.03, 0.03, 0.34)), MAT.shaft);
+    case "ball": return new THREE.Mesh(geo("ball", () => new THREE.SphereGeometry(0.075, 10, 8)), MAT.iron);
+    case "iceShard": return new THREE.Mesh(geo("iceShard", () => new THREE.OctahedronGeometry(0.075, 0)), MAT.ice);
+    case "ring": { const m = new THREE.Mesh(geo("burstRing", () => new THREE.RingGeometry(0.8, 1, 40)), basic(0xffffff, { op: 0.8, add: true })); m.rotation.x = -Math.PI / 2; return m; }
+    case "sphere": return new THREE.Mesh(geo("fxSphere", () => new THREE.SphereGeometry(1, 16, 12)), basic(0xffa040, { op: 0.9, add: true }));
+    case "debris": return new THREE.Mesh(geo("debris", () => new THREE.BoxGeometry(0.07, 0.07, 0.07)), MAT.stoneDark);
+  }
+  return null;
+}
+/** A mesh of this kind from the pool (added to the scene once), or null when the pool is used up. */
+function takeMesh(kind) {
+  const free = pools[kind] || (pools[kind] = []);
+  let m = free.pop();
+  if (!m) {
+    if ((made[kind] || 0) >= MAX[kind]) return null;
+    made[kind] = (made[kind] || 0) + 1;
+    m = makeMesh(kind);
+    m.userData.kind = kind;
+    fxRoot.add(m);
+  }
+  m.visible = true;
+  return m;
+}
+function giveMesh(m) { m.visible = false; pools[m.userData.kind].push(m); }
+
+// Active effects are plain records reused from a free list.
+const active = [], freeRecs = [];
+function rec(kind, mesh, life) {
+  const r = freeRecs.pop() || {};
+  r.kind = kind; r.mesh = mesh; r.start = performance.now(); r.life = life; r.end = 0;
+  active.push(r);
+  return r;
+}
+
+const END_NONE = 0, END_EXPLODE = 1, END_FROST = 2;
+const tmp = new THREE.Vector3();
+
 export function updateFx(now) {
-  for (let i = fxObjs.length - 1; i >= 0; i--) {
-    const f = fxObjs[i], t = (now - f.start) / f.life;
-    if (t >= 1) {
-      fxRoot.remove(f.mesh);
-      if (f.mesh.material && f.mesh.material.userData.temp) f.mesh.material.dispose();
-      fxObjs.splice(i, 1);
-      if (f.onEnd) f.onEnd();
-      continue;
+  let keep = 0;
+  for (let i = 0; i < active.length; i++) {
+    const r = active[i], t = (now - r.start) / r.life;
+    if (t >= 1) { finish(r); continue; }
+    step(r, Math.max(0, t));
+    active[keep++] = r;
+  }
+  active.length = keep;
+}
+function step(r, t) {
+  const m = r.mesh;
+  switch (r.kind) {
+    case "proj": {
+      const y = r.y0 + (r.y1 - r.y0) * t + Math.sin(Math.PI * t) * r.arc;
+      tmp.set(r.x0 + (r.x1 - r.x0) * t, y, r.z0 + (r.z1 - r.z0) * t);
+      if (r.orient) m.lookAt(tmp); else m.rotation.x += 0.3;
+      m.position.copy(tmp);
+      break;
     }
-    f.update(Math.max(0, t), f.mesh);
+    case "ring": m.scale.setScalar(0.15 + r.radius * (1 - Math.pow(1 - t, 3))); m.material.opacity = 0.8 * (1 - t); break;
+    case "sphere": m.scale.setScalar(0.12 + r.radius * 0.75 * (1 - Math.pow(1 - t, 2))); m.material.opacity = 0.9 * (1 - t); break;
+    case "debris": {
+      const s = t * 0.62;
+      m.position.set(r.x0 + Math.cos(r.a) * r.sp * s, Math.max(0.03, 0.3 + r.vy * s - 4.5 * s * s), r.z0 + Math.sin(r.a) * r.sp * s);
+      m.rotation.x += 0.2; m.rotation.y += 0.15;
+      m.scale.setScalar(1 - t * 0.9);
+      break;
+    }
   }
 }
-function projectile(geometry, material, from, to, life, arc, orient, onEnd) {
-  const m = new THREE.Mesh(geometry, material), p = new THREE.Vector3();
-  m.position.copy(from);
-  addTemp(m, life, (t, mesh) => {
-    p.lerpVectors(from, to, t); p.y += Math.sin(Math.PI * t) * arc;
-    if (orient) mesh.lookAt(p);
-    mesh.position.copy(p);
-    if (!orient) mesh.rotation.x += 0.3;
-  }, onEnd);
+function finish(r) {
+  if (r.mesh) giveMesh(r.mesh);
+  if (r.end === END_EXPLODE) explosion(r.x1, r.z1, 0.95);
+  else if (r.end === END_FROST) ringBurst(r.x1, r.z1, 0x6cc8ff, 0.8, 380);
+  r.mesh = null;
+  freeRecs.push(r);
 }
-function tempMat(hex, op) { const m = basic(hex, { op, add: true }); m.userData.temp = true; return m; }
-export function ringBurst(pos, hex, radius, life) {
-  const mat = tempMat(hex, 0.8);
-  const m = new THREE.Mesh(geo("burstRing", () => new THREE.RingGeometry(0.8, 1, 40)), mat);
-  m.rotation.x = -Math.PI / 2; m.position.set(pos.x, 0.04, pos.z);
-  addTemp(m, life, t => { m.scale.setScalar(0.15 + radius * (1 - Math.pow(1 - t, 3))); mat.opacity = 0.8 * (1 - t); });
+
+function projectile(kind, x0, y0, z0, x1, y1, z1, life, arc, orient, end) {
+  const m = takeMesh(kind);
+  if (!m) { if (end === END_EXPLODE) explosion(x1, z1, 0.95); return; }
+  m.position.set(x0, y0, z0); m.rotation.set(0, 0, 0); m.scale.setScalar(1);
+  const r = rec("proj", m, life);
+  r.x0 = x0; r.y0 = y0; r.z0 = z0; r.x1 = x1; r.y1 = y1; r.z1 = z1; r.arc = arc; r.orient = orient; r.end = end;
 }
-function explosion(pos, radius) {
-  const mat = tempMat(0xffa040, 0.9);
-  const m = new THREE.Mesh(geo("fxSphere", () => new THREE.SphereGeometry(1, 16, 12)), mat);
-  m.position.copy(pos);
-  addTemp(m, 340, t => { m.scale.setScalar(0.12 + radius * 0.75 * (1 - Math.pow(1 - t, 2))); mat.opacity = 0.9 * (1 - t); });
-  ringBurst(pos, 0xffb060, radius, 420);
-  debris(pos.x, pos.z, MAT.stoneDark, 3, 0.9);
+const ringColor = new THREE.Color();
+export function ringBurst(x, z, hex, radius, life) {
+  const m = takeMesh("ring");
+  if (!m) return;
+  m.position.set(x, 0.04, z); m.scale.setScalar(0.15);
+  m.material.color.copy(ringColor.setHex(hex).convertSRGBToLinear()); m.material.opacity = 0.8;
+  rec("ring", m, life).radius = radius;
+}
+function explosion(x, z, radius) {
+  const m = takeMesh("sphere");
+  if (m) { m.position.set(x, 0.32, z); m.scale.setScalar(0.12); m.material.opacity = 0.9; rec("sphere", m, 340).radius = radius; }
+  ringBurst(x, z, 0xffb060, radius, 420);
+  debris(x, z, MAT.stoneDark, 3, 0.9);
 }
 function debris(x, z, material, n, power) {
   for (let i = 0; i < n; i++) {
-    const m = new THREE.Mesh(geo("debris", () => new THREE.BoxGeometry(0.07, 0.07, 0.07)), material);
-    const a = Math.random() * Math.PI * 2, sp = (0.6 + Math.random() * 0.9) * power, vy = 1.4 + Math.random() * 1.2;
-    m.position.set(x, 0.3, z);
-    addTemp(m, 620, (t, mesh) => {
-      const s = t * 0.62;
-      mesh.position.set(x + Math.cos(a) * sp * s, Math.max(0.03, 0.3 + vy * s - 4.5 * s * s), z + Math.sin(a) * sp * s);
-      mesh.rotation.x += 0.2; mesh.rotation.y += 0.15;
-      mesh.scale.setScalar(1 - t * 0.9);
-    });
+    const m = takeMesh("debris");
+    if (!m) return;
+    m.material = material; m.position.set(x, 0.3, z); m.scale.setScalar(1);
+    const r = rec("debris", m, 620);
+    r.x0 = x; r.z0 = z; r.a = Math.random() * Math.PI * 2; r.sp = (0.6 + Math.random() * 0.9) * power; r.vy = 1.4 + Math.random() * 1.2;
   }
 }
+
 const ENEMY_MAT = () => [MAT.shadow, MAT.runner, MAT.armor, MAT.colossus];
+/** Plays one effect from the simulation: [kind, x*10, z*10, x*10|type, z*10|killer+1]. */
 export function spawnFx(f) {
   if (!renderer) return;
   const k = f[0], now = performance.now();
@@ -68,18 +130,23 @@ export function spawnFx(f) {
     const x = f[1] / 10, z = f[2] / 10, ty = f[3], killer = f[4] - 1;
     if (!ENEMIES[ty]) return;
     debris(x, z, ENEMY_MAT()[ty], ty === 3 ? 12 : 5, ty === 3 ? 1.6 : 1);
-    ringBurst(new THREE.Vector3(x, 0, z), ty === 3 ? 0xff5030 : 0x9b6dff, ty === 3 ? 1.3 : 0.6, 450);
-    if (killer >= 0 && killer === S.mySeat) floats.push({ x, z, text: "+" + ENEMIES[ty].gold, start: now });
+    ringBurst(x, z, ty === 3 ? 0xff5030 : 0x9b6dff, ty === 3 ? 1.3 : 0.6, 450);
+    if (killer >= 0 && killer === S.mySeat && floats.length < MAX.float) floats.push({ x, z, text: "+" + ENEMIES[ty].gold, start: now });
     return;
   }
   const x1 = f[1] / 10, z1 = f[2] / 10, x2 = f[3] / 10, z2 = f[4] / 10;
   const to = towerObjs.get(Math.floor(z1) * COLS + Math.floor(x1));
-  const from = new THREE.Vector3(x1, to ? to.g.userData.top : 0.35, z1), dest = new THREE.Vector3(x2, 0.32, z2);
-  if (k === 0) projectile(geo("arrow", () => new THREE.BoxGeometry(0.03, 0.03, 0.34)), MAT.shaft, from, dest, 150, 0.15, true);
+  const top = to ? to.top : 0.35;
+  if (k === 0) projectile("arrow", x1, top, z1, x2, 0.32, z2, 150, 0.15, true, END_NONE);
   else if (k === 1) {
     if (to) to.aimT = Math.atan2(x2 - x1, z2 - z1);
-    projectile(geo("ball", () => new THREE.SphereGeometry(0.075, 10, 8)), MAT.iron, from, dest, 300, 0.7, false, () => explosion(dest, 0.95));
-  } else if (k === 2) projectile(geo("iceShard", () => new THREE.OctahedronGeometry(0.075, 0)), MAT.ice, from, dest, 220, 0.25, true, () => ringBurst(dest, 0x6cc8ff, 0.8, 380));
-  else if (k === 3) bolts.push({ a: from, b: dest, start: now, seed: Math.random() * 1000 });
+    projectile("ball", x1, top, z1, x2, 0.32, z2, 300, 0.7, false, END_EXPLODE);
+  } else if (k === 2) projectile("iceShard", x1, top, z1, x2, 0.32, z2, 220, 0.25, true, END_FROST);
+  else if (k === 3 && bolts.length < MAX.bolt) bolts.push({ a: { x: x1, y: top, z: z1 }, b: { x: x2, y: 0.32, z: z2 }, start: now, seed: Math.random() * 1000 });
 }
 
+/** How many effect meshes exist and how many are in use, for the benchmark. */
+export function fxStats() {
+  let made_ = 0; for (const k in made) made_ += made[k];
+  return { meshes: made_, active: active.length };
+}

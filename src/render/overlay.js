@@ -17,7 +17,7 @@ export function drawOverlay(v, now) {
   for (const o of enemyObjs.values()) {
     const e = o.e;
     if (!e || e.hp >= e.mhp) continue;
-    const [sx, sy] = proj(o.g.position.x, o.g.userData.h + 0.2, o.g.position.z);
+    const [sx, sy] = proj(o.x, o.h + 0.2, o.z);
     const w = Math.max(18, Math.min(70, cp * (e.ty === 3 ? 1.2 : 0.7))), h = Math.max(4, Math.min(8, cp * 0.11)), f = Math.max(0, Math.min(1, e.hp / e.mhp));
     g.fillStyle = "rgba(20,10,4,.88)"; rr(g, sx - w / 2 - 1.5, sy - 1.5, w + 3, h + 3, 3); g.fill();
     g.fillStyle = f > 0.5 ? "#6fd25a" : f > 0.25 ? "#f0b429" : "#e2483c"; rr(g, sx - w / 2, sy, w * f, h, 2); g.fill();
