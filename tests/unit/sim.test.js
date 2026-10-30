@@ -177,3 +177,20 @@ test("a pause stops the wave and the break timer until someone resumes", () => {
   sim.step(STEP);
   assert.notEqual(sim.enemies.map(e => e.d).join(), before, "anyone can resume");
 });
+
+test("a wave is finished at once only when everyone at the table agrees", () => {
+  const sim = table(2);
+  act(sim, 0, "r", 1); act(sim, 1, "r", 1);
+  sim.step(STEP);
+  act(sim, 0, "f", 1);
+  assert.equal(sim.finishing(), false, "one vote is not enough");
+  act(sim, 1, "f", 1);
+  assert.equal(sim.finishing(), true);
+  act(sim, 1, "p", 1);
+  assert.equal(sim.finishing(), false, "not while paused");
+  act(sim, 1, "p", 0);
+  let n = 0;
+  while (sim.finishing() && n++ < 30 * 300) sim.step(STEP);
+  assert.equal(sim.ph, 1, "the wave is over");
+  assert.equal(sim.sk, 0, "votes reset for the next wave");
+});

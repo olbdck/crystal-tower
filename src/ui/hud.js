@@ -73,7 +73,7 @@ export function updateUI(v, now) {
 
   // ready button
   const rb = $("readyBtn"), rl = $("readyLbl"), rs = $("readySub");
-  rb.classList.remove("nudge");
+  rb.classList.remove("nudge"); rb.title = "";
   if (v && v.ph <= 2 && myOffer(v).length) {
     // a card pick is waiting: the button opens it (and getting ready waits for it)
     rb.disabled = false; rb.classList.remove("on"); rb.classList.add("nudge");
@@ -86,6 +86,14 @@ export function updateUI(v, now) {
     rb.disabled = false; rb.classList.toggle("on", r);
     if (!r && (v.w === 0 || nReady > 0)) rb.classList.add("nudge");
     rl.textContent = r ? "Готовий" : "До бою"; rs.textContent = `${nReady}/${seatedCount} готові`;
+  } else if (v && v.ph === 2 && seat >= 0 && !v.pz) {
+    // during a wave the button votes to finish it at once
+    const pf = [...S.queue].reverse().find(q => q[1] === "f");
+    const mine = pf ? !!pf[2] : !!(v.sk & (1 << seat));
+    const voters = v.seats.filter(Boolean).length, n = v.seats.reduce((a, s, i) => a + (s && v.sk & (1 << i) ? 1 : 0), 0);
+    rb.disabled = false; rb.classList.toggle("on", mine);
+    rl.textContent = "Завершити"; rs.textContent = voters > 1 ? `хвилю · ${n}/${voters} за` : "хвилю зараз";
+    rb.title = "Дограти хвилю миттєво (F). Результат той самий, просто не треба чекати";
   } else {
     rb.disabled = true; rb.classList.remove("on");
     rl.textContent = v && v.ph === 2 ? "Бій" : "До бою";

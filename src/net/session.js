@@ -25,6 +25,7 @@ const KF_REQUEST_MS = 600; // at most one keyframe request per this long
 const TERMINAL = new Set(["revoked", "not_granted", "capability_disabled", "capability_removed", "transform_error"]);
 const isCoarse = (() => { try { return matchMedia("(pointer: coarse)").matches; } catch (_) { return false; } })();
 
+let quietFx = false;
 let ticker = null, hostAcc = 0, lastHostTime = 0, hostLinkLostAt = -1e9, hostSince = 0;
 let seq = Math.floor(Date.now() / 10) % 1e11;
 const sentAt = new Map();
@@ -304,7 +305,7 @@ function becomeHost() {
   follower.reset();
   S.sim = sim;
   sim.e = (S.cur ? S.cur.e : 0) + 1;
-  sim.onFx = f => { if (onFx) onFx(f); };
+  sim.onFx = f => { if (onFx && !quietFx) onFx(f); };
   const prev = S.cur;
   S.isHost = true; hostSince = now;
   S.cur = { peer: S.myPeer, e: sim.e };
@@ -341,6 +342,13 @@ function hostLoop() {
   let n = 0;
   while (hostAcc >= STEP_MS && n < 90) { rec.step(); hostAcc -= STEP_MS; n++; }
   if (hostAcc >= STEP_MS) hostAcc = 0;
+  // everyone voted to finish the wave: play the rest of it at once (a minute of game per loop at most);
+  // the other players' copies skip ahead the same way, without effects
+  if (S.sim.finishing()) {
+    quietFx = true;
+    for (let k = 0; k < 30 * 60 && S.sim.finishing(); k++) rec.step();
+    quietFx = false;
+  }
   flushStream();
   if (now - lastRetain > KF_RETAIN_MS) { lastRetain = now; S.room.stream.retain(makeKeyframe()); }
   ackFromSim();

@@ -19,7 +19,9 @@ The in-game interface is in Ukrainian.
 
 Any seated player can pause the game for everyone with the pause button or `P`, and anyone can resume it; while paused, the sign shows a fact from the rules. A paused wave stands still: no building, upgrading, selling or spells until it goes on.
 
-Keys: `P` pause, `1–4` towers, `5–7` spells, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
+During a wave the round button turns into **«Завершити»** (Finish, key `F`): when everyone at the table agrees, the rest of the wave is played out at once. The result is exactly what waiting would give, just without the wait.
+
+Keys: `F` finish the wave, `P` pause, `1–4` towers, `5–7` spells, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
 
 ## Cards
 

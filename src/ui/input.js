@@ -88,10 +88,20 @@ export function doReady() {
   const seat = mySeat(v);
   if (v.ph >= 3) { if (seat >= 0) act("n"); return; }
   if (myOffer(v).length) { openOffer(); return; }
+  if (seat >= 0 && v.ph === 2 && !v.pz) { finishWave(v, seat); return; }
   if (seat < 0 || v.ph !== 1) return;
   const pending = [...S.queue].reverse().find(q => q[1] === "r");
   const curReady = pending ? !!pending[2] : v.ready[seat];
   act("r", curReady ? 0 : 1); S.uiDirty = true;
+}
+
+/** Votes to finish the current wave at once (everyone at the table has to agree). */
+function finishWave(v, seat) {
+  const pf = [...S.queue].reverse().find(q => q[1] === "f");
+  const mine = pf ? !!pf[2] : !!(v.sk & (1 << seat));
+  act("f", mine ? 0 : 1);
+  if (!mine && v.seats.filter(Boolean).length > 1) toast("Хвиля завершиться, коли всі за столом погодяться");
+  S.uiDirty = true;
 }
 
 function onBoardClick(e) {
@@ -147,5 +157,6 @@ export function initInput() {
     else if (e.code === "KeyS") doSell();
     else if (e.code === "KeyR") doReady();
     else if (e.code === "KeyP") togglePause();
+    else if (e.code === "KeyF") { const v = getView(performance.now()), seat = mySeat(v); if (v && seat >= 0 && v.ph === 2 && !v.pz) finishWave(v, seat); }
   });
 }

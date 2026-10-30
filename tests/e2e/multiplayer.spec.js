@@ -204,3 +204,25 @@ test("any player can pause the game for everyone, and anyone can resume it", asy
   expect(a.errors).toEqual([]); expect(b.errors).toEqual([]);
   await a.context.close(); await b.context.close();
 });
+
+test("when everyone agrees, the rest of the wave plays out at once and copies stay in step", async ({ browser }) => {
+  const a = await openGame(browser);
+  await sitDown(a.page, "Олег");
+  await waitView(a.page, v => v.host);
+  const hash = new URL(await a.page.evaluate(() => window.__kv.inviteLink())).hash;
+  const b = await openGame(browser, { path: "/" + hash });
+  await sitDown(b.page, "Марко");
+  await waitView(b.page, v => v.mySeat === 1);
+  for (const p of [a.page, b.page]) await p.evaluate(() => { window.__kv.act("b", window.__kv.S.isHost ? 104 : 124, 0); window.__kv.act("r", 1); });
+  await waitView(b.page, v => v.w === 1 && v.ph === 2);
+  await a.page.keyboard.press("KeyF");
+  await a.page.waitForTimeout(800);
+  expect((await view(a.page)).ph).toBe(2);
+  await b.page.click("#readyBtn");
+  await waitView(a.page, v => v.ph === 1 && v.w === 1, null, 5000);
+  await waitView(b.page, v => v.ph === 1 && v.w === 1, null, 5000);
+  const d = await b.page.evaluate(() => window.__kv.hostDebug());
+  expect(d.follow.resyncs).toBe(0);
+  expect(a.errors).toEqual([]); expect(b.errors).toEqual([]);
+  await a.context.close(); await b.context.close();
+});

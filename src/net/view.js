@@ -15,6 +15,6 @@ export function getView(now) {
   return {
     ph: sim.ph, w: sim.w, l: sim.l, tm: sim.tm, sp: sim.sp, pc: sim.pc, hs: sim.hs, seats: sim.seats, gold: sim.gold,
     kills: sim.kills, ready: sim.ready, towers: [...sim.towers.values()], tmap: sim.towers, enemies, syn: sim.syn, t: sim.t + alpha,
-    pv: sim.pv, hand: sim.hand, offer: sim.offer, gr: sim.gr, pz: sim.pz,
+    pv: sim.pv, hand: sim.hand, offer: sim.offer, gr: sim.gr, pz: sim.pz, sk: sim.sk,
   };
 }
