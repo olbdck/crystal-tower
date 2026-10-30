@@ -28,6 +28,7 @@ test("upgrading and selling use the published prices", () => {
   assert.equal(sim.towers.get(cell).lv, 2);
   assert.equal(sim.gold[0], 1000 - TOWERS[1].cost - upgradeCost(1, 1));
   const before = sim.gold[0];
+  sim.ph = 2; // during a wave: the usual sale (in the break a fresh tower is undone for its full price)
   act(sim, 0, "s", cell);
   assert.equal(sim.towers.has(cell), false);
   assert.equal(sim.gold[0], before + sellValue(1, 2));
@@ -205,4 +206,22 @@ test("double speed needs everyone at the table", () => {
   assert.equal(sim.speed(), 2, "players who are away do not count");
   act(sim, 0, "x", 0);
   assert.equal(sim.speed(), 1);
+});
+
+test("a tower built during the break can be undone for every coin until the wave starts", () => {
+  const sim = table(2), a = 5 * COLS + 4, b = 5 * COLS + 5;
+  sim.gold.fill(1000);
+  act(sim, 0, "b", a, 1); act(sim, 0, "u", a);
+  act(sim, 0, "s", a);
+  assert.equal(sim.gold[0], 1000, "built and upgraded, then undone: all back");
+  act(sim, 0, "b", a, 1); act(sim, 1, "u", a);
+  const before = sim.gold[0];
+  act(sim, 0, "s", a);
+  assert.equal(sim.gold[0], before + sellValue(1, 2), "a teammate paid for it: the usual sale");
+  act(sim, 0, "b", b, 0);
+  act(sim, 0, "r", 1); act(sim, 1, "r", 1); sim.step(STEP);
+  sim.ph = 1; // back in a break after the wave
+  const g = sim.gold[0];
+  act(sim, 0, "s", b);
+  assert.equal(sim.gold[0], g + sellValue(0, 1), "built before the last wave: the usual sale");
 });

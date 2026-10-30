@@ -14,7 +14,7 @@ import { BLOCKED, COLS, ENEMIES, MAX_SEATS, MAX_WAVES, NO_OWNER, PATHS, ROWS, TO
 
 export const MSG_KEYFRAME = 1, MSG_BATCH = 2, MSG_REQ = 3, MSG_BUNDLE = 4;
 export const OP_TICK = 1, OP_ROSTER = 2, OP_ACT = 3, OP_HASH = 4;
-const FORMAT = 7; // 2: wave timer for the crystal's gold drip; 3: cards; 4: the "Єдність" card; 5: pause; 6: finish-wave votes; 7: speed
+const FORMAT = 8; // 2: wave timer for the crystal's gold drip; 3: cards; 4: the "Єдність" card; 5: pause; 6: finish-wave votes; 7: speed; 8: undo
 const MAX_ROSTER = 32, MAX_LABEL = 24, MAX_ARGS = 3;
 
 const te = new TextEncoder(), td = new TextDecoder();
@@ -97,7 +97,7 @@ export function encodeKeyframe(sim, { e, seq, build }) {
   w.uv(sim.ak.size); for (const [l, x] of sim.ak) { w.str(l); w.uv(x); }
   w.uv(sim.gone.size); for (const [l, t] of sim.gone) { w.str(l); w.uv(t); }
   w.uv(sim.towers.size);
-  for (const tw of sim.towers.values()) { w.u8(tw.c); w.u8(tw.ty); w.u8(tw.lv); w.sv(tw.o); w.f64(tw.cd); w.f64(tw.bt || 0); }
+  for (const tw of sim.towers.values()) { w.u8(tw.c); w.u8(tw.ty); w.u8(tw.lv); w.sv(tw.o); w.f64(tw.cd); w.f64(tw.bt || 0); w.f64(tw.fr || 0); }
   w.uv(sim.enemies.length);
   for (const en of sim.enemies) {
     w.uv(en.id); w.u8(en.ty | (en.ln << 4) | (en.sl ? 128 : 0)); w.f64(en.d); w.f64(en.hp);
@@ -142,9 +142,9 @@ export function decodeKeyframe(bytes) {
   const nt = r.uv();
   if (nt > COLS * ROWS) throw new RangeError("bad towers");
   for (let i = 0; i < nt; i++) {
-    const c = r.u8(), ty = r.u8(), lv = r.u8(), o = r.sv(), cd = r.f64(), bt = r.f64();
+    const c = r.u8(), ty = r.u8(), lv = r.u8(), o = r.sv(), cd = r.f64(), bt = r.f64(), fr = r.f64();
     if (c >= COLS * ROWS || BLOCKED[c] || !TOWERS[ty] || lv < 1 || lv > 3 || !(o === NO_OWNER || (o >= 0 && o < MAX_SEATS))) throw new RangeError("bad tower");
-    m.towers.set(c, { c, ty, lv, o, cd, bt });
+    m.towers.set(c, { c, ty, lv, o, cd, bt, fr });
   }
   const ne = r.uv();
   if (ne > 500) throw new RangeError("bad enemies");

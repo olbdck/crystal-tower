@@ -114,7 +114,8 @@ export class Sim {
       const cost = buildCost(this.pv[seat], ty);
       if (this.gold[seat] < cost) return;
       this.gold[seat] -= cost;
-      this.towers.set(cell, { c: cell, ty, lv: 1, o: seat, cd: 0, bt: 0 }); this.tv++;
+      // fr: gold its owner paid during the current break; while it is set, selling gives all of it back
+      this.towers.set(cell, { c: cell, ty, lv: 1, o: seat, cd: 0, bt: 0, fr: this.ph === 1 ? cost : 0 }); this.tv++;
       this.recomputeSyn();
     } else if (code === "u") {
       const tw = this.towers.get(it[2]);
@@ -122,10 +123,12 @@ export class Sim {
       const cost = upCost(this.pv[seat], tw.ty, tw.lv);
       if (this.gold[seat] < cost) return;
       this.gold[seat] -= cost; tw.lv++; this.tv++;
+      tw.fr = tw.fr > 0 && this.ph === 1 && seat === tw.o ? tw.fr + cost : 0; // someone else paid: no full refund
     } else if (code === "s") {
       const tw = this.towers.get(it[2]);
       if (!tw || tw.o !== seat || this.ph > 2) return;
-      this.gold[seat] += sellFor(this.pv[seat], tw.ty, tw.lv);
+      // built (and upgraded) during this break: undo with every coin back; otherwise the usual sale
+      this.gold[seat] += this.ph === 1 && tw.fr > 0 ? tw.fr : sellFor(this.pv[seat], tw.ty, tw.lv);
       this.towers.delete(tw.c); this.recomputeSyn(); this.tv++;
     } else if (code === "r") {
       // a card on offer must be picked before getting ready
@@ -204,6 +207,7 @@ export class Sim {
   }
   startWave() {
     this.w++; this.ph = 2; this.sp = 0; this.sc = 0.5; this.tm = 0; this.wt = 0; this.sk = 0;
+    for (const tw of this.towers.values()) tw.fr = 0;
     this.pc = Math.max(1, this.occupied().length);
     this.hs = hpScale(this.w, this.pc);
     this.ready.fill(false);
@@ -343,7 +347,7 @@ export class Sim {
       const st = this.seats[i];
       for (let k = 0; k < st.length; k++) h = Math.imul(h ^ st.charCodeAt(k), 16777619);
     }
-    for (const tw of this.towers.values()) { h = mix(h, tw.c); h = mix(h, tw.ty * 4 + tw.lv); h = mix(h, tw.o); h = mix(h, tw.cd); h = mix(h, tw.bt); }
+    for (const tw of this.towers.values()) { h = mix(h, tw.c); h = mix(h, tw.ty * 4 + tw.lv); h = mix(h, tw.o); h = mix(h, tw.cd); h = mix(h, tw.bt); h = mix(h, tw.fr); }
     for (const e of this.enemies) { h = mix(h, e.id); h = mix(h, e.d); h = mix(h, e.hp); h = mix(h, e.sl); }
     return h >>> 0;
   }

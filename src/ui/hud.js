@@ -128,7 +128,7 @@ export function updateUI(v, now) {
   else {
     sc.hidden = false;
     const opv = tw.o >= 0 ? v.pv[tw.o] : 0, s = towerStatsFor(tw.ty, tw.lv, opv), syn = v.syn.get(tw.c) || 0;
-    const key = [tw.c, tw.ty, tw.lv, tw.o, syn, v.seats[tw.o] ? nameOfPeer(v.seats[tw.o]) : "", g, seat, synKey, v.seats.join(","), opv, pv].join("|");
+    const key = [tw.c, tw.ty, tw.lv, tw.o, syn, v.seats[tw.o] ? nameOfPeer(v.seats[tw.o]) : "", g, seat, synKey, v.seats.join(","), opv, pv, tw.fr, v.ph].join("|");
     if (key !== lastSelKey) {
       lastSelKey = key;
       const url = TEST.noRender ? "" : portrait("t", tw.ty, tw.lv, tw.o); if (url) $("selImg").src = url;
@@ -165,7 +165,9 @@ export function updateUI(v, now) {
       const up = $("upBtn"), sell = $("sellBtn");
       if (tw.lv >= 3) { up.textContent = "Максимум"; up.disabled = true; }
       else { const c = upCost(pv, tw.ty, tw.lv); up.textContent = `Покращити · ${c}`; up.disabled = seat < 0 || (g || 0) < c; }
-      sell.textContent = `Продати · ${sellFor(opv, tw.ty, tw.lv)}`;
+      const undo = v.ph === 1 && tw.fr > 0;
+      sell.textContent = undo ? `Скасувати · ${tw.fr}` : `Продати · ${sellFor(opv, tw.ty, tw.lv)}`;
+      sell.title = undo ? "Вежу поставлено на цій перерві: усе золото повернеться" : "";
       sell.disabled = tw.o !== seat;
       $("selNote").textContent = tw.o === seat ? "" : "Покращення за ваше золото. За вбивства половина нагороди йде власнику, решта ділиться між усіма.";
       const sl = $("selSyn"); sl.textContent = "";

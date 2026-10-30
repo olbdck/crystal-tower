@@ -23,6 +23,8 @@ During a wave the round button turns into **«Завершити»** (Finish, ke
 
 The **×1 / ×2** button (key `X`) asks for double speed; the game runs at ×2 once everyone at the table has asked.
 
+A tower you placed during the current break can be taken back for every coin you paid for it (the sell button says **«Скасувати»**) until the next wave starts; after that, selling returns 65% as usual.
+
 Keys: `F` finish the wave, `X` double speed, `P` pause, `1–4` towers, `5–7` spells, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
 
 ## Cards
