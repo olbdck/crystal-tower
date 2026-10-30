@@ -9,6 +9,7 @@ import { portrait } from "../render/portraits.js";
 import { mySeat, myGold, myPv, myOffer, canBuildAt } from "../game.js";
 import { selectSpell, castAt, openOffer } from "./cards.js";
 import { togglePause, toggleSpeed } from "./pause.js";
+import { initHand } from "./hand.js";
 import { playSound } from "../audio/sound.js";
 import { S } from "../state.js";
 import { $, ICON, toast } from "./dom.js";
@@ -20,13 +21,18 @@ function buildCards() {
   const hand = $("hand");
   TOWERS.forEach((t, i) => {
     const b = document.createElement("button");
-    b.type = "button"; b.className = "card t" + i; b.id = "card" + i;
+    b.type = "button"; b.className = "card t" + i + (t.support ? " support" : ""); b.id = "card" + i;
+    // shooting towers show damage and range; support towers what they give their neighbours
+    const stats = t.support
+      ? `<span>${t.support === "range" ? ICON.range : t.support === "dmg" ? ICON.sword : "×2"}<em></em></span><span class="near">поруч</span>`
+      : `<span>${ICON.sword}<em></em></span><span>${ICON.range}<em></em></span>`;
     b.innerHTML = `<span class="face"><span class="art"><img alt=""></span><span class="ribbon outlined"></span><span class="txt"></span>` +
-      `<span class="stats"><span>${ICON.sword}<em></em></span><span>${ICON.range}<em></em></span></span></span><span class="cost outlined">${t.cost}</span><span class="need" hidden></span><kbd>${i + 1}</kbd>`;
+      `<span class="stats">${stats}</span></span><span class="cost outlined">${t.cost}</span><span class="need" hidden></span><kbd>${i + 1}</kbd>`;
     b.querySelector(".ribbon").textContent = t.name;
     b.querySelector(".txt").textContent = t.desc;
     const ems = b.querySelectorAll(".stats em");
-    ems[0].textContent = String(t.dmg); ems[1].textContent = String(t.range);
+    if (t.support) ems[0].textContent = t.support === "multi" ? `${Math.round(t.aura[0] * 100)}%` : `+${Math.round(t.aura[0] * 100)}%`;
+    else { ems[0].textContent = String(t.dmg); ems[1].textContent = String(t.range); }
     b.setAttribute("aria-label", `${t.name}, ${t.cost} золота. ${t.desc}`);
     b.addEventListener("click", () => selectBuild(i));
     hand.appendChild(b);
@@ -134,6 +140,7 @@ function onBoardClick(e) {
 let lastPointerType = "mouse";
 export function initInput() {
   buildCards();
+  initHand();
   setInterval(() => { if (pendingHover) { lastHoverSent = performance.now(); setPresence(pendingHover); pendingHover = null; } }, 70);
 
   glCanvas.addEventListener("pointermove", e => {
@@ -159,8 +166,13 @@ export function initInput() {
   document.addEventListener("keydown", e => {
     if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    const m = /^Digit([1-7])$/.exec(e.code);
-    if (m) { if (+m[1] <= 4) selectBuild(+m[1] - 1); else selectSpell(+m[1] - 5); e.preventDefault(); }
+    // 1-7: towers in hand order, 8, 9, 0: spells
+    const m = /^Digit([0-9])$/.exec(e.code);
+    if (m) {
+      const k = +m[1] === 0 ? 10 : +m[1];
+      if (k <= TOWERS.length) selectBuild(k - 1); else selectSpell(k - TOWERS.length - 1);
+      e.preventDefault();
+    }
     else if (e.code === "Escape") { if (!closeTopModal()) cancelAll(); }
     else if (e.code === "KeyU") doUpgrade();
     else if (e.code === "KeyS") doSell();

@@ -238,3 +238,43 @@ test("the game keeps score for the summary: damage, gold, towers and the best to
   assert.ok(sim.earn[0] >= waveBonus(1));
   assert.equal(sim.lost, START_LIVES - sim.l);
 });
+
+test("support towers do not shoot but strengthen every shooting tower around them", async () => {
+  const { auraAt, towerStats } = await import("../../src/sim/rules.js");
+  const sim = table(2), archer = 5 * COLS + 4, beacon = 5 * COLS + 5, banner = 6 * COLS + 4, far = 7 * COLS + 12;
+  sim.gold.fill(5000);
+  act(sim, 0, "b", archer, 0);
+  act(sim, 1, "b", beacon, 4); act(sim, 1, "b", banner, 5); act(sim, 1, "b", far, 6);
+  assert.deepEqual(sim.aura.get(archer), { range: 0.2, dmg: 0.2, multi: 0 }, "a teammate's supports count too");
+  assert.equal(sim.aura.has(beacon), false, "supports get no aura themselves");
+  const s = sim.statsOf(sim.towers.get(archer));
+  assert.ok(Math.abs(s.range - towerStats(0, 1).range * 1.2) < 1e-9);
+  assert.ok(Math.abs(s.dmg - towerStats(0, 1).dmg * 1.2) < 1e-9);
+  act(sim, 1, "u", beacon);
+  assert.equal(sim.aura.get(archer).range, 0.3, "upgrading a support strengthens its aura");
+  act(sim, 1, "b", 6 * COLS + 5, 4);
+  assert.ok(sim.towers.has(6 * COLS + 5));
+  assert.equal(auraAt(sim.towers, sim.towers.get(archer)).range, 0.3, "the strongest of one kind counts, they do not add up");
+  // supports never fire
+  act(sim, 0, "r", 1); act(sim, 1, "r", 1);
+  for (let i = 0; i < 30 * 20; i++) sim.step(STEP);
+  for (const c of [beacon, banner, far]) assert.equal(sim.towers.get(c).dm, 0);
+});
+
+test("Відлуння gives its neighbours a chance to attack twice", () => {
+  // an archer shooting at an enemy that cannot die, for 100 seconds of game
+  const shots = withEcho => {
+    const sim = table(1), cell = 5 * COLS + 4;
+    sim.gold[0] = 5000;
+    act(sim, 0, "b", cell, 0);
+    if (withEcho) { act(sim, 0, "b", 5 * COLS + 5, 6); act(sim, 0, "u", 5 * COLS + 5); act(sim, 0, "u", 5 * COLS + 5); }
+    sim.enemies.push({ id: 1, ty: 0, ln: 0, d: 5, pd: 5, hp: 1e12, sl: 0, x: 4.5, y: 4.5, dead: false, leak: false, killer: -1 });
+    let n = 0;
+    sim.onFx = f => { if (f[0] === 0) n++; };
+    const tw = sim.towers.get(cell);
+    for (let i = 0; i < 30 * 100; i++) { sim.t++; sim.fire(tw, STEP); }
+    return n;
+  };
+  const plain = shots(false), echo = shots(true);
+  assert.ok(echo > plain * 1.25 && echo < plain * 1.45, `with Відлуння (35%) ${echo} arrows, without ${plain}`);
+});

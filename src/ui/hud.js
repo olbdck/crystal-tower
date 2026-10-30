@@ -1,7 +1,7 @@
 // The heads-up display: connection plaque, wave banner, crystal, ready button, gold and cards,
 // the selected tower panel, the party list and the end-of-game sign.
-import { MAX_SEATS, MAX_WAVES, START_LIVES, TOWERS, ENEMIES, GIFT, SYN_BONUS, OWN_SYN_MAX, waveTotal, waveBosses, waveMix } from "../sim/rules.js";
-import { P, buildCost, upCost, sellFor, towerStatsFor } from "../sim/cards.js";
+import { MAX_SEATS, MAX_WAVES, START_LIVES, TOWERS, ENEMIES, GIFT, SYN_BONUS, OWN_SYN_MAX, isSupport, waveTotal, waveBosses, waveMix } from "../sim/rules.js";
+import { P, buildCost, upCost, sellFor, towerStatsFor, withAura } from "../sim/cards.js";
 import { TEST } from "../config.js";
 import { S } from "../state.js";
 import { act, advertise, nameOfPeer } from "../net/session.js";
@@ -133,8 +133,8 @@ export function updateUI(v, now) {
   if (!tw) { sc.hidden = true; if (S.selCell >= 0 && v) S.selCell = -1; lastSelKey = ""; }
   else {
     sc.hidden = false;
-    const opv = tw.o >= 0 ? v.pv[tw.o] : 0, s = towerStatsFor(tw.ty, tw.lv, opv), syn = v.syn.get(tw.c) || 0;
-    const key = [tw.c, tw.ty, tw.lv, tw.o, syn, v.seats[tw.o] ? nameOfPeer(v.seats[tw.o]) : "", g, seat, synKey, v.seats.join(","), opv, pv, tw.fr, v.ph].join("|");
+    const opv = tw.o >= 0 ? v.pv[tw.o] : 0, au = v.aura.get(tw.c) || null, s = withAura(towerStatsFor(tw.ty, tw.lv, opv), au), syn = v.syn.get(tw.c) || 0;
+    const key = [tw.c, tw.ty, tw.lv, tw.o, syn, v.seats[tw.o] ? nameOfPeer(v.seats[tw.o]) : "", g, seat, synKey, v.seats.join(","), opv, pv, tw.fr, v.ph, JSON.stringify(au)].join("|");
     if (key !== lastSelKey) {
       lastSelKey = key;
       const url = TEST.noRender ? "" : portrait("t", tw.ty, tw.lv, tw.o); if (url) $("selImg").src = url;
@@ -146,16 +146,29 @@ export function updateUI(v, now) {
       const on = document.createElement("span"); on.textContent = tw.o < 0 ? "нічия вежа" : v.seats[tw.o] ? nameOfPeer(v.seats[tw.o]) + (tw.o === seat ? " (ви)" : "") : "вільне місце";
       owner.append(sw, on);
       // current stats, and what the next level would give (upgrade preview)
-      const nx = tw.lv < 3 ? towerStatsFor(tw.ty, tw.lv + 1, opv) : null, synK = 1 + SYN_BONUS * syn;
-      const rows = [
-        ["Шкода", (s.dmg * synK).toFixed(1), nx && (nx.dmg * synK).toFixed(1)],
-        ["Постріл", `${s.rate.toFixed(2)} с`, nx && `${nx.rate.toFixed(2)} с`],
-        ["Дальність", s.range.toFixed(1), nx && nx.range.toFixed(1)],
-      ];
-      if (tw.ty === 1) rows.push(["Вибух", String(+s.splash.toFixed(2)), null]);
-      if (tw.ty === 2) rows.push(["Холод", `${s.slowDur.toFixed(1)} с`, nx && `${nx.slowDur.toFixed(1)} с`]);
-      if (tw.ty === 3) rows.push(["Перескоки", String(s.chain), nx && String(nx.chain)]);
-      rows.push(["Синергія", syn ? `+${Math.round(syn * SYN_BONUS * 100)}%` : "—", null]);
+      const nx = tw.lv < 3 ? withAura(towerStatsFor(tw.ty, tw.lv + 1, opv), au) : null, synK = 1 + SYN_BONUS * syn;
+      let rows;
+      if (isSupport(tw.ty)) {
+        // a support tower: its aura now and after an upgrade, and how many towers it reaches
+        const d = TOWERS[tw.ty], n = [...v.tmap.values()].filter(t => !isSupport(t.ty) && t.c !== tw.c && Math.abs(t.c % 20 - tw.c % 20) <= 1 && Math.abs(((t.c / 20) | 0) - ((tw.c / 20) | 0)) <= 1).length;
+        const pct = x => `${d.support === "multi" ? "" : "+"}${Math.round(x * 100)}%`;
+        rows = [
+          [{ range: "Дальність", dmg: "Шкода", multi: "Удар двічі" }[d.support], pct(d.aura[tw.lv - 1]), tw.lv < 3 && pct(d.aura[tw.lv])],
+          ["Сусідам", n ? `${n} ${n === 1 ? "вежа" : n < 5 ? "вежі" : "веж"}` : "нікого", null],
+        ];
+      } else {
+        rows = [
+          ["Шкода", (s.dmg * synK).toFixed(1), nx && (nx.dmg * synK).toFixed(1)],
+          ["Постріл", `${s.rate.toFixed(2)} с`, nx && `${nx.rate.toFixed(2)} с`],
+          ["Дальність", s.range.toFixed(1), nx && nx.range.toFixed(1)],
+        ];
+        if (tw.ty === 1) rows.push(["Вибух", String(+s.splash.toFixed(2)), null]);
+        if (tw.ty === 2) rows.push(["Холод", `${s.slowDur.toFixed(1)} с`, nx && `${nx.slowDur.toFixed(1)} с`]);
+        if (tw.ty === 3) rows.push(["Перескоки", String(s.chain), nx && String(nx.chain)]);
+        if (s.multi) rows.push(["Удар двічі", `${Math.round(s.multi * 100)}%`, null]);
+        rows.push(["Синергія", syn ? `+${Math.round(syn * SYN_BONUS * 100)}%` : "—", null]);
+        if (au) rows.push(["Підтримка", [au.range && "Маяк", au.dmg && "Стяг", au.multi && "Відлуння"].filter(Boolean).join(", "), null]);
+      }
       const dl = $("selInfo"); dl.textContent = "";
       dl.classList.toggle("has-next", !!nx);
       for (const [k, val, next] of rows) {
@@ -177,6 +190,8 @@ export function updateUI(v, now) {
       sell.disabled = tw.o !== seat;
       $("selNote").textContent = tw.o === seat ? "" : "Покращення за ваше золото. За вбивства половина нагороди йде власнику, решта ділиться між усіма.";
       const sl = $("selSyn"); sl.textContent = "";
+      if (isSupport(tw.ty)) sl.append("Не стріляє. Кожна вежа, що стріляє, на 8 клітинках навколо отримує це підсилення, чия б вона не була. Кілька однакових підсилень не додаються, діє найсильніше.");
+      else {
       const rel = otherOwners(v.tmap, tw.c, tw.o, tw.ty, tw.o >= 0 && !!(opv & (1 << P.unity)));
       if (rel.owners.size || rel.types.size) {
         sl.append("Підсилюють:");
@@ -196,6 +211,7 @@ export function updateUI(v, now) {
       const lb = document.createElement("button"); lb.type = "button"; lb.className = "linkbtn"; lb.textContent = "Як працює синергія";
       lb.addEventListener("click", openSyn);
       sl.appendChild(lb);
+      }
     }
   }
 

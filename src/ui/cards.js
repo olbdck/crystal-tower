@@ -6,6 +6,8 @@ import { act } from "../net/session.js";
 import { getView } from "../net/view.js";
 import { mySeat, myGold, myOffer, myHand, castPending } from "../game.js";
 import { $, toast } from "./dom.js";
+import { layoutHand } from "./hand.js";
+import { TOWERS } from "../sim/rules.js";
 import { playSound } from "../audio/sound.js";
 
 // Line icons on a 24x24 grid, drawn with the current text colour.
@@ -102,23 +104,26 @@ export function castAt(v, cell) {
   return true;
 }
 
+// spells join the end of the hand, after the tower cards
 function renderSpells(v, g) {
-  const hand = myHand(v), box = $("spells");
+  const hand = myHand(v), box = $("hand");
   const key = hand.join(",");
+  let cards = [...box.querySelectorAll(".spell")];
   if (key !== handKey) {
     handKey = key;
-    box.textContent = "";
+    for (const c of cards) c.remove();
     hand.forEach((id, i) => {
       const b = cardElement(SPELL_BASE + id);
-      const k = document.createElement("kbd"); k.textContent = String(5 + i); b.appendChild(k);
+      const k = document.createElement("kbd"); k.textContent = String((TOWERS.length + 1 + i) % 10); b.appendChild(k);
       b.addEventListener("click", () => selectSpell(i));
       box.appendChild(b);
     });
     if (S.castSlot >= hand.length) S.castSlot = -1;
+    cards = [...box.querySelectorAll(".spell")];
+    layoutHand();
   }
-  box.hidden = !hand.length;
   const wave = v.ph === 2, pending = castPending();
-  [...box.children].forEach((b, i) => {
+  cards.forEach((b, i) => {
     const sp = SPELLS[hand[i]], poor = g !== null && g < sp.cost;
     b.classList.toggle("poor", poor);
     b.classList.toggle("sel", S.castSlot === i);

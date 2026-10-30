@@ -1,6 +1,6 @@
 // Answers about "me" in the current view, shared by the HUD, input handling and the renderer.
 // They count actions we sent but the host has not confirmed yet, so the UI reacts at once.
-import { COLS, ROWS, BLOCKED, MAX_TOWERS, GIFT } from "./sim/rules.js";
+import { COLS, ROWS, BLOCKED, MAX_TOWERS, GIFT, TOWERS } from "./sim/rules.js";
 import { SPELLS, buildCost, upCost } from "./sim/cards.js";
 import { S } from "./state.js";
 
@@ -20,7 +20,7 @@ export function myGold(v) {
   const pv = v.pv[seat];
   let g = v.gold[seat];
   for (const q of S.queue) {
-    if (q[1] === "b" && q[3] >= 0 && q[3] < 4) g -= buildCost(pv, q[3]);
+    if (q[1] === "b" && TOWERS[q[3]]) g -= buildCost(pv, q[3]);
     else if (q[1] === "u") { const tw = v.tmap.get(q[2]); if (tw && tw.lv < 3) g -= upCost(pv, tw.ty, tw.lv); }
     else if (q[1] === "g") g -= GIFT;
     else if (q[1] === "m") { const id = v.hand[seat][q[2]]; if (SPELLS[id]) g -= SPELLS[id].cost; }

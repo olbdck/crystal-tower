@@ -70,10 +70,27 @@ function pill(g, sx, sy, text, bg, fg, size) {
   g.fillStyle = fg; g.fillText(text, sx, sy + 0.5);
   return h;
 }
+/** "+20% дальності", "+30% шкоди", "25% двічі". */
+export function auraText(kind, value) {
+  const p = Math.round(value * 100);
+  return kind === "range" ? `+${p}% дальності` : kind === "dmg" ? `+${p}% шкоди` : `${p}% удар двічі`;
+}
 function drawSynLabels(g, v, cp, now) {
   const h = synHint, x = h.cell % COLS + 0.5, z = ((h.cell / COLS) | 0) + 0.5;
   const big = Math.round(Math.max(12, Math.min(16, cp * 0.3))), small = Math.max(11, big - 2);
   g.textAlign = "center"; g.textBaseline = "middle";
+  if (h.aura) {
+    // a support tower: what it gives, above it and under each tower it strengthens
+    const text = auraText(h.aura.kind, h.aura.value), [sx, sy] = proj(x, 1.9, z);
+    pill(g, sx, sy, h.aura.targets.length ? `${text} · веж: ${h.aura.targets.length}` : `${text} вежам поруч`, "#fff07a", "#3a2312", big);
+    const pulse = 1 + Math.sin(now * 0.008) * 0.06;
+    const short = `${h.aura.kind === "multi" ? "×2 " : "+"}${Math.round(h.aura.value * 100)}%`;
+    for (const t of h.aura.targets) {
+      const [bx, by] = proj(t.c % COLS + 0.5, 0, ((t.c / COLS) | 0) + 0.5);
+      pill(g, bx, by + small * 1.4, short, SEAT_CSS[t.o] || "#c0954a", "#fff", Math.round(small * pulse));
+    }
+    return;
+  }
   if (h.kind === "build") {
     const [sx, sy] = proj(x, 1.9, z);
     if (h.count > 0) {

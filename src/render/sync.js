@@ -1,8 +1,8 @@
 // Keeps the 3D objects in step with the game view: towers, enemies, synergy links and auras,
 // the crystal, the build cursor and teammates' pointers.
 import * as THREE from "three";
-import { COLS, ROWS, CRYSTAL, START_LIVES, TOWERS, ENEMIES, BLOCKED, SLOW_FACTOR, posAt, towerStats } from "../sim/rules.js";
-import { SPELLS, buildCost, has, towerStatsFor } from "../sim/cards.js";
+import { COLS, ROWS, CRYSTAL, START_LIVES, TOWERS, ENEMIES, BLOCKED, SLOW_FACTOR, posAt, towerStats, isSupport } from "../sim/rules.js";
+import { SPELLS, buildCost, has, towerStatsFor, withAura } from "../sim/cards.js";
 import { OWN_SYN_MAX } from "../sim/rules.js";
 import { MAT, SEAT_HEX, col, geo, part, mergeGeos } from "./gfx.js";
 import { towerModel } from "./models.js";
@@ -174,6 +174,25 @@ function linkMesh(fromCell, cells, mat, w) {
   }
   return parts.length ? new THREE.Mesh(mergeGeos(parts), mat) : null;
 }
+/** For a support tower of type ty and level lv on a cell: its aura and the shooting towers around it. */
+function auraTargets(v, cell, ty, lv) {
+  if (!isSupport(ty)) return null;
+  const x = cell % COLS, y = (cell / COLS) | 0, targets = [];
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const nx = x + dx, ny = y + dy;
+    if ((!dx && !dy) || nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+    const t = v.tmap.get(ny * COLS + nx);
+    if (t && !isSupport(t.ty)) targets.push(t);
+  }
+  return { kind: TOWERS[ty].support, value: TOWERS[ty].aura[lv - 1], targets };
+}
+function markRings(d, towers, hex) {
+  towers.slice(0, 8).forEach((t, i) => {
+    const m = d.partnerRings[i]; m.visible = true;
+    m.position.set(t.c % COLS + 0.5, 0.03, ((t.c / COLS) | 0) + 0.5);
+    m.material.color.copy(col(hex));
+  });
+}
 function zoneMesh(cell) {
   const box = geo("linkNI", () => new THREE.BoxGeometry(1, 1, 1).toNonIndexed());
   const x = cell % COLS, y = (cell / COLS) | 0, mtx = new THREE.Matrix4(), parts = [];
@@ -251,25 +270,33 @@ export function updateCursor(v, now) {
       const gm = d.ghosts[S.buildType]; gm.visible = true; gm.position.set(x, 0, z);
       MAT.ghost.color.copy(col(ok ? myHex : 0x6b6259));
       MAT.ghost.opacity = ok ? 0.55 : 0.35;
-      showRange(hc, towerStatsFor(S.buildType, 1, pvOf(seat)).range, ok ? 0xfff1bd : 0xff3b30);
+      if (!isSupport(S.buildType)) showRange(hc, towerStatsFor(S.buildType, 1, pvOf(seat)).range, ok ? 0xfff1bd : 0xff3b30);
       const pv = synergyPreview(v, hc, seat, S.buildType);
-      synHint = { kind: "build", cell: hc, ty: S.buildType, ...pv };
+      synHint = { kind: "build", cell: hc, ty: S.buildType, ...pv, aura: auraTargets(v, hc, S.buildType, 1) };
+      if (synHint.aura) markRings(d, synHint.aura.targets, 0xfff07a);
       synKeyNow = `b${hc}|${seat}|${synKey}`;
       setSynPreview(synKeyNow, () => [zoneMesh(hc), linkMesh(hc, pv.partners.map(t => t.c), MAT.linkHot, 0.1)]);
     }
   }
   const st = S.selCell >= 0 ? v.tmap.get(S.selCell) : null;
   if (st) {
-    showRange(S.selCell, towerStatsFor(st.ty, st.lv, pvOf(st.o)).range, SEAT_HEX[st.o] || 0xf1cd6a);
+    if (!isSupport(st.ty)) showRange(S.selCell, withAura(towerStatsFor(st.ty, st.lv, pvOf(st.o)), v.aura.get(st.c)).range, SEAT_HEX[st.o] || 0xf1cd6a);
     d.selRing.visible = true; d.selRing.position.set(S.selCell % COLS + 0.5, 0.03, ((S.selCell / COLS) | 0) + 0.5);
     d.selRing.rotation.z = now * 0.001;
-    if (S.upgradePreview && st.lv < 3) {
+    if (S.upgradePreview && st.lv < 3 && !isSupport(st.ty)) {
       d.nextRing.visible = true;
       d.nextRing.position.set(S.selCell % COLS + 0.5, 0.024, ((S.selCell / COLS) | 0) + 0.5);
-      d.nextRing.scale.setScalar(towerStatsFor(st.ty, st.lv + 1, pvOf(st.o)).range);
+      d.nextRing.scale.setScalar(withAura(towerStatsFor(st.ty, st.lv + 1, pvOf(st.o)), v.aura.get(st.c)).range);
       d.nextRing.material.opacity = 0.65 + Math.sin(now * 0.01) * 0.25;
     }
-    if (!synKeyNow) {
+    if (!synKeyNow && isSupport(st.ty)) {
+      // a support tower: its 3x3 area and the shooting towers it strengthens
+      const aura = auraTargets(v, S.selCell, st.ty, S.upgradePreview && st.lv < 3 ? st.lv + 1 : st.lv);
+      synHint = { kind: "sel", cell: S.selCell, count: 0, partners: [], aura };
+      synKeyNow = `a${S.selCell}|${st.lv}|${synKey}`;
+      setSynPreview(synKeyNow, () => [zoneMesh(S.selCell)]);
+      markRings(d, aura.targets, 0xfff07a);
+    } else if (!synKeyNow) {
       const r = otherOwners(v.tmap, S.selCell, st.o, st.ty, unityOf(v, st.o));
       synHint = { kind: "sel", cell: S.selCell, count: v.syn.get(S.selCell) || 0, partners: r.partners };
       synKeyNow = `s${S.selCell}|${synKey}`;

@@ -18,12 +18,12 @@ test("a card pick opens by itself, and spells are cast from the hand during a wa
   await a.page.evaluate(s => { const sim = window.__kv.S.sim; sim.hand[0] = [s]; sim.gold[0] = 500; window.__kv.act("b", 104, 0); window.__kv.act("r", 1); }, SP.storm);
   await waitView(a.page, v => v.ph === 2);
   await a.page.waitForFunction(() => window.__kv.S.sim.enemies.length > 0);
-  await expect(a.page.locator("#spells .card")).toHaveCount(1);
-  await a.page.keyboard.press("Digit5");
+  await expect(a.page.locator("#hand .card.spell")).toHaveCount(1);
+  await a.page.keyboard.press("Digit8"); // keys 1-7 are towers, 8, 9, 0 the spells
   await a.page.waitForFunction(() => window.__kv.S.sim.hand[0].length === 0);
   const slowed = await a.page.evaluate(() => window.__kv.S.sim.enemies.every(e => e.sl > 3));
   expect(slowed).toBe(true);
-  await expect(a.page.locator("#spells")).toBeHidden();
+  await expect(a.page.locator("#hand .card.spell")).toHaveCount(0);
   expect(a.errors).toEqual([]);
   await a.context.close();
 });

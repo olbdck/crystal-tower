@@ -38,6 +38,37 @@ export function towerModel(ty, lv, seatMat, ghost) {
     ud.shards = [];
     for (let i = 1; i < lv; i++) ud.shards.push(part(g, geo("shard", () => new THREE.OctahedronGeometry(0.06, 0)), M(MAT.ice), 0, ud.crystalY, 0, { noShadow: true }));
     ud.top = ud.crystalY;
+  } else if (ty === 4) {
+    // Маяк: a slim stone column with a glowing lamp in a gold cage
+    const h = 0.62 + 0.12 * (lv - 1);
+    part(g, geo("bcShaft", () => new THREE.CylinderGeometry(0.12, 0.2, 1, 8)), M(MAT.stone), 0, 0.2 + h / 2, 0, { s: [1, h, 1], ...sh });
+    part(g, geo("bcBowl", () => new THREE.CylinderGeometry(0.2, 0.12, 0.1, 8)), M(seatMat), 0, 0.25 + h, 0, sh);
+    for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; part(g, geo("bcBar", () => new THREE.BoxGeometry(0.03, 0.28, 0.03)), M(MAT.gold), Math.cos(a) * 0.15, 0.43 + h, Math.sin(a) * 0.15, { noShadow: true }); }
+    part(g, geo("bcCap", () => new THREE.ConeGeometry(0.2, 0.16, 8)), M(MAT.gold), 0, 0.64 + h, 0, sh);
+    ud.orbY = 0.43 + h;
+    ud.orb = part(g, geo("bcLamp" + lv, () => new THREE.SphereGeometry(0.09 + 0.015 * lv, 14, 12)), M(MAT.beacon), 0, ud.orbY, 0, { noShadow: true });
+    ud.top = ud.orbY;
+  } else if (ty === 5) {
+    // Стяг: a war banner in the owner's colour on a tall pole, with a pennant on top
+    const h = 0.95 + 0.1 * (lv - 1), w = 0.3 + 0.04 * (lv - 1);
+    part(g, geo("bnPole", () => new THREE.CylinderGeometry(0.03, 0.04, 1, 6)), M(MAT.woodDark), 0, 0.2 + h / 2, 0, { s: [1, h, 1], ...sh });
+    part(g, geo("bnBar", () => new THREE.CylinderGeometry(0.02, 0.02, 1, 5)), M(MAT.woodDark), 0, 0.12 + h, 0.04, { rz: Math.PI / 2, s: [1, w + 0.08, 1], ...sh });
+    part(g, geo("bnCloth" + lv, () => new THREE.BoxGeometry(w, 0.42 + 0.05 * (lv - 1), 0.02)), M(seatMat), 0, h - 0.12 - 0.025 * (lv - 1), 0.05, sh);
+    part(g, geo("bnEmblem", () => new THREE.CylinderGeometry(0.06, 0.06, 0.025, 12)), M(MAT.gold), 0, h - 0.1, 0.065, { rx: Math.PI / 2, noShadow: true });
+    part(g, geo("bnFinial", () => new THREE.SphereGeometry(0.045, 10, 8)), M(MAT.gold), 0, 0.24 + h, 0, { noShadow: true });
+    ud.flag = part(g, geo("flag", () => new THREE.BoxGeometry(0.18, 0.1, 0.012)), M(seatMat), 0.09, 0.32 + h, 0, { noShadow: true });
+    ud.top = 0.2 + h;
+  } else if (ty === 6) {
+    // Відлуння: a ring of standing stones around a floating violet crystal
+    part(g, geo("ecDrum", () => new THREE.CylinderGeometry(0.3, 0.34, 0.12, 10)), M(MAT.stoneDark), 0, 0.24, 0, sh);
+    const n = 2 + lv, sh2 = 0.34 + 0.06 * lv;
+    for (let i = 0; i < n; i++) { const a = i * Math.PI * 2 / n + 0.3; part(g, geo("ecStone", () => new THREE.BoxGeometry(0.07, 1, 0.09)), M(MAT.stone), Math.cos(a) * 0.25, 0.3 + sh2 / 2, Math.sin(a) * 0.25, { s: [1, sh2, 1], ry: -a, ...sh }); }
+    part(g, geo("ecRing", () => new THREE.TorusGeometry(0.25, 0.018, 6, 24)), M(seatMat), 0, 0.33 + sh2, 0, { rx: Math.PI / 2, noShadow: true });
+    ud.crystalY = 0.62 + 0.05 * lv;
+    ud.crystal = part(g, geo("ecCrys" + lv, () => new THREE.OctahedronGeometry(0.11 + 0.02 * lv, 0)), M(MAT.echo), 0, ud.crystalY, 0, { s: [1, 1.5, 1], noShadow: true });
+    ud.shards = [];
+    for (let i = 1; i < lv; i++) ud.shards.push(part(g, geo("ecShard", () => new THREE.OctahedronGeometry(0.05, 0)), M(MAT.echo), 0, ud.crystalY, 0, { noShadow: true }));
+    ud.top = ud.crystalY;
   } else {
     part(g, geo("teBase", () => new THREE.CylinderGeometry(0.2, 0.27, 0.2, 8)), M(MAT.iron), 0, 0.27, 0, sh);
     const h = 0.72 + 0.1 * (lv - 1);

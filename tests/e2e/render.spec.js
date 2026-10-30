@@ -6,7 +6,7 @@ test("the 3D table renders without errors", async ({ browser }) => {
   await sitDown(a.page, "Олег");
   await a.page.waitForFunction(() => { const r = window.__kv.renderer(); return r && r.info.render.calls > 10; }, null, { timeout: 30_000 });
   await expect(a.page.locator("#fallback")).toBeHidden();
-  await expect(a.page.locator(".card")).toHaveCount(4);
+  await expect(a.page.locator("#hand .card")).toHaveCount(7); // 4 shooting and 3 support towers
   expect(a.errors).toEqual([]);
   await a.context.close();
 });

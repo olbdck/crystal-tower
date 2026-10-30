@@ -3,7 +3,7 @@
 // A seed varies how often each bot shops, its first tower type and which of the best free cells it takes,
 // so averages over several seeds show the difficulty better than one deterministic game.
 import { Sim } from "../../src/sim/sim.js";
-import { TOWERS, PATHS, BLOCKED, COLS, ROWS, STEP, START_LIVES, posAt, upgradeCost } from "../../src/sim/rules.js";
+import { TOWERS, PATHS, BLOCKED, COLS, ROWS, STEP, START_LIVES, posAt, upgradeCost, isSupport } from "../../src/sim/rules.js";
 import { P, SP, SPELLS, isSpellCode } from "../../src/sim/cards.js";
 
 const PREFER = ["unity", "temper", "eye", "archer", "craft", "powder", "arc", "winter", "trade"].map(k => P[k]);
@@ -52,24 +52,51 @@ function rng(seed) {
 }
 
 /** Plays one game with n bot players; returns the wave reached, lives left and how each wave went. */
-export function playGame(n, { archersOnly = false, seed = 0, cards = true } = {}) {
+// Support towers go on a free cell touching the most shooting towers (at least three), or are skipped.
+function supportCell(sim) {
+  let best = -1, most = 2;
+  for (let c = 0; c < COLS * ROWS; c++) {
+    if (BLOCKED[c] || sim.towers.has(c)) continue;
+    const x = c % COLS, y = (c / COLS) | 0;
+    let n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const t = (dx || dy) && x + dx >= 0 && x + dx < COLS && y + dy >= 0 && y + dy < ROWS ? sim.towers.get((y + dy) * COLS + x + dx) : null;
+      if (t && !isSupport(t.ty)) n++;
+    }
+    // prefer cells that shooters would cover the path poorly from
+    if (n > most || (n === most && best >= 0 && cov[c] < cov[best])) { most = n; best = c; }
+  }
+  return best;
+}
+
+export function playGame(n, { archersOnly = false, seed = 0, cards = true, supports = true } = {}) {
   const sim = new Sim();
   sim.assignSeats(Array.from({ length: n }, (_, i) => "bot" + i));
   let seq = 0;
   const rand = rng(seed + 1), period = seed ? 60 + Math.floor(rand() * 60) : 90, pick = seed ? 3 : 1;
-  const built = Array.from({ length: n }, () => (seed ? Math.floor(rand() * ROTATION.length) : 0));
+  const built = Array.from({ length: n }, () => (seed ? Math.floor(rand() * ROTATION.length) : 0)), sup = Array(n).fill(0), shooters = Array(n).fill(0);
   const act = (s, ...a) => sim.apply(s, [++seq, ...a]);
   function spend(s) {
     for (let guard = 0; guard < 20; guard++) {
-      const g = sim.gold[s], ty = archersOnly ? 0 : ROTATION[built[s] % ROTATION.length];
-      const mine = [...sim.towers.values()].filter(t => t.o === s);
+      let ty = archersOnly ? 0 : ROTATION[built[s] % ROTATION.length];
+      // now and then a support tower: one per six shooters from the fourth wave on (beacon, banner, echo in turn)
+      const wantSupport = supports && !archersOnly && sim.w >= 4 && shooters[s] >= 6 * (sup[s] + 1);
+      if (wantSupport) ty = 4 + sup[s] % 3;
+      const g = sim.gold[s];
+      const mine = [...sim.towers.values()].filter(t => t.o === s && !isSupport(t.ty)); // supports are extra
       const wantBuild = mine.length < (archersOnly ? 99 : 3 + Math.floor(sim.w * 0.6));
       const free = () => { const f = order.filter(c => !sim.towers.has(c)).slice(0, pick); return f[Math.floor(rand() * f.length)]; };
-      if (wantBuild && g >= TOWERS[ty].cost) { const c = free(); if (c === undefined) return; act(s, "b", c, ty); built[s]++; continue; }
+      if (isSupport(ty)) {
+        const c = supportCell(sim);
+        if (c < 0) { sup[s]++; continue; } // no good spot: skip it
+        if (g < TOWERS[ty].cost) return; // save up for it
+        act(s, "b", c, ty); sup[s]++; continue;
+      }
+      if (wantBuild && g >= TOWERS[ty].cost) { const c = free(); if (c === undefined) return; act(s, "b", c, ty); built[s]++; shooters[s]++; continue; }
       if (!archersOnly) {
         const up = mine.filter(t => t.lv < 3).sort((a, b) => cov[b.c] - cov[a.c])[0];
         if (up && g >= upgradeCost(up.ty, up.lv)) { act(s, "u", up.c); continue; }
-        if (!wantBuild && g >= TOWERS[ty].cost + 120) { const c = free(); if (c !== undefined) { act(s, "b", c, ty); built[s]++; continue; } }
+        if (!wantBuild && g >= TOWERS[ty].cost + 120) { const c = free(); if (c !== undefined) { act(s, "b", c, ty); built[s]++; shooters[s]++; continue; } }
       }
       return;
     }

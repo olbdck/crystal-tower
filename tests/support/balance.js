@@ -12,6 +12,6 @@ function report(label, n, opts = {}) {
 for (const n of [1, 2, 3, 4, 5]) report(`${n} player${n > 1 ? "s" : ""}`, n);
 report("3, archers only", 3, { archersOnly: true });
 if (process.argv.includes("--compare")) {
-  console.log("-- without cards");
-  for (const n of [1, 2, 3, 4, 5]) report(`${n} player${n > 1 ? "s" : ""}`, n, { cards: false });
+  console.log("-- without support towers");
+  for (const n of [1, 2, 3, 4, 5]) report(`${n} player${n > 1 ? "s" : ""}`, n, { supports: false });
 }

@@ -3,9 +3,9 @@
 // stay bit-for-bit equal without sending positions around. Keep it deterministic: no clocks, no
 // Math.random, no engine-dependent maths, and iterate Maps and arrays in insertion order.
 import {
-  BLOCKED, BREAK_TIME, COLS, CRYSTAL, DRIP_EVERY, ENEMIES, GIFT, KILL_SHARE, dripCap, waveBonus, MAX_ENEMIES, MAX_SEATS, MAX_TOWERS, MAX_WAVES, PATHS, ROWS, SEAT_GRACE, NO_OWNER, SLOW_FACTOR, START_GOLD, START_LIVES, SYN_BONUS, TOWERS, enemyTypeAt, hpScale, posAt, sellValue, spawnInterval, synergyAt, towerStats, upgradeCost, waveTotal,
+  BLOCKED, BREAK_TIME, COLS, CRYSTAL, auraAt, hash01, isSupport, DRIP_EVERY, ENEMIES, GIFT, KILL_SHARE, dripCap, waveBonus, MAX_ENEMIES, MAX_SEATS, MAX_TOWERS, MAX_WAVES, PATHS, ROWS, SEAT_GRACE, NO_OWNER, SLOW_FACTOR, START_GOLD, START_LIVES, SYN_BONUS, TOWERS, enemyTypeAt, hpScale, posAt, sellValue, spawnInterval, synergyAt, towerStats, upgradeCost, waveTotal,
 } from "./rules.js";
-import { HAND_MAX, SPELLS, SPELL_BASE, SP, buildCost, cardWave, drawOffer, has, isSpellCode, sellFor, towerStatsFor, upCost } from "./cards.js";
+import { HAND_MAX, SPELLS, SPELL_BASE, SP, withAura, buildCost, cardWave, drawOffer, has, isSpellCode, sellFor, towerStatsFor, upCost } from "./cards.js";
 
 const F64 = new Float64Array(1), W32 = new Uint32Array(F64.buffer);
 // FNV-1a over the exact bits of a number
@@ -32,7 +32,7 @@ export class Sim {
     this.dmg = [0, 0, 0, 0, 0]; this.earn = [0, 0, 0, 0, 0]; this.gave = [0, 0, 0, 0, 0]; this.built = [0, 0, 0, 0, 0]; this.casts = [0, 0, 0, 0, 0];
     this.lost = 0; this.best = { ty: -1, lv: 0, o: -1, dm: 0 };
     for (let i = 0; i < MAX_SEATS; i++) if (this.seats[i]) this.u |= 1 << i;
-    this.towers = new Map(); this.enemies = []; this.nid = 1; this.syn = new Map(); this.tv = (this.tv || 0) + 1;
+    this.towers = new Map(); this.enemies = []; this.nid = 1; this.syn = new Map(); this.aura = new Map(); this.tv = (this.tv || 0) + 1;
   }
   /** Players sitting at the table right now, in joining order. Changes come from the host as inputs. */
   setRoster(labels) { this.roster = labels.slice(); this.assignSeats(this.roster); }
@@ -101,9 +101,14 @@ export class Sim {
   }
   /** Seats whose player is at the table right now (not away). */
   present() { return this.occupied().filter(i => !this.gone.has(this.seats[i])); }
+  /** Synergy and support auras of every tower; whenever towers or their levels change. */
   recomputeSyn() {
-    this.syn = new Map();
-    for (const tw of this.towers.values()) this.syn.set(tw.c, synergyAt(this.towers, tw, tw.o >= 0 && has(this.pv[tw.o], "unity")));
+    this.syn = new Map(); this.aura = new Map();
+    for (const tw of this.towers.values()) {
+      this.syn.set(tw.c, synergyAt(this.towers, tw, tw.o >= 0 && has(this.pv[tw.o], "unity")));
+      const a = auraAt(this.towers, tw);
+      if (a) this.aura.set(tw.c, a);
+    }
   }
   apply(seat, it) {
     const code = it[1];
@@ -129,6 +134,7 @@ export class Sim {
       const cost = upCost(this.pv[seat], tw.ty, tw.lv);
       if (this.gold[seat] < cost) return;
       this.gold[seat] -= cost; tw.lv++; this.tv++;
+      if (isSupport(tw.ty)) this.recomputeSyn(); // a stronger aura for its neighbours
       tw.fr = tw.fr > 0 && this.ph === 1 && seat === tw.o ? tw.fr + cost : 0; // someone else paid: no full refund
     } else if (code === "s") {
       const tw = this.towers.get(it[2]);
@@ -292,10 +298,22 @@ export class Sim {
     e.hp -= dmg;
     if (e.hp <= 0) { e.dead = true; e.killer = owner; }
   }
+  /** Stats of a shooting tower with its owner's cards and the auras of support towers around it. */
+  statsOf(tw) {
+    return withAura(towerStatsFor(tw.ty, tw.lv, tw.o >= 0 ? this.pv[tw.o] : 0), this.aura.get(tw.c));
+  }
   fire(tw, dt) {
+    if (isSupport(tw.ty)) return; // support towers do not shoot
     if (tw.cd > 0) tw.cd -= dt;
     if (tw.cd > 0) return;
-    const s = towerStatsFor(tw.ty, tw.lv, tw.o >= 0 ? this.pv[tw.o] : 0);
+    const s = this.statsOf(tw);
+    if (!this.shoot(tw, s)) { tw.cd = 0; return; }
+    tw.cd += tw.bt > 0 ? s.rate / 2 : s.rate;
+    // "Відлуння" next to it: a chance to attack once more right away (a fixed roll, the same on every copy)
+    if (s.multi && hash01(this.t * 977 + tw.c * 131 + tw.lv) < s.multi) this.shoot(tw, s);
+  }
+  /** One attack at the enemy closest to the crystal within range; false if there is none. */
+  shoot(tw, s) {
     const cx = tw.c % COLS + 0.5, cy = ((tw.c / COLS) | 0) + 0.5, r2 = s.range * s.range;
     let best = null, bestRem = Infinity;
     for (const e of this.enemies) {
@@ -305,8 +323,7 @@ export class Sim {
       const rem = PATHS[e.ln].len - e.d;
       if (rem < bestRem) { bestRem = rem; best = e; }
     }
-    if (!best) { tw.cd = 0; return; }
-    tw.cd += tw.bt > 0 ? s.rate / 2 : s.rate;
+    if (!best) return false;
     const dmg = s.dmg * (1 + SYN_BONUS * (this.syn.get(tw.c) || 0)), o = tw.o;
     if (tw.ty === 0) {
       this.fx(0, cx, cy, best.x, best.y);
@@ -339,6 +356,7 @@ export class Sim {
         target = nb;
       }
     }
+    return true;
   }
   /**
    * An effect for the renderer. Never affects the game.

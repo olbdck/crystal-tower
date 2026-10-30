@@ -29,7 +29,7 @@ After the game a summary shows each player's kills, damage, gold earned, towers 
 
 Sounds are synthesised in the browser (no audio files): shots of each tower, explosions, kills and gold, leaks, wave start and end, cards, spells and building. The speaker button next to the crystal sets the volume or mutes it; the setting is remembered.
 
-Keys: `F` finish the wave, `X` double speed, `P` pause, `1–4` towers, `5–7` spells, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
+Keys: `1–7` towers, `8`, `9`, `0` spells, `F` finish the wave, `X` double speed, `P` pause, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
 
 ## Cards
 
@@ -39,6 +39,16 @@ After every third wave (3, 6, … 18) each player picks 1 of 3 cards, drawn for 
 - **Passive cards** stay for the rest of the game and act on your own towers or on what you pay: cheaper Archers or upgrades, longer frost, a wider cannon blast, one more lightning jump, +10% range or damage, a better refund when selling. They show as small icons next to your name.
 - **Spells** cost gold, are cast once during a wave and then disappear (up to 3 in hand): Fireball, Blizzard (everyone slowed), Earthquake (enemies pushed back), Crystal Power (+3 lives), Overcharge (a tower fires twice as fast for 8 s) and Gold Rush (double kill share for 10 s). Damage grows with the waves.
 - Enemies get a little tougher after each card pick, more so with more players, so the cards add choices rather than make the game easy.
+
+## Support towers
+
+Three towers do not shoot. They strengthen every shooting tower on the 8 cells around them, whoever's it is, and get stronger with each level:
+
+- **Маяк (Beacon)**: +20 / 30 / 40% range.
+- **Стяг (Banner)**: +20 / 30 / 40% damage.
+- **Відлуння (Echo)**: a 15 / 25 / 35% chance to attack twice in a row.
+
+Several supports of the same kind around one tower do not add up; the strongest one counts. Selecting or placing a support shows its area and the towers it reaches.
 
 ## Synergy
 

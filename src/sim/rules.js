@@ -26,7 +26,35 @@ export const TOWERS = [
   { name: "Гармата", desc: "Повільна, б’є по площі", cost: 90, dmg: 28, rate: 1.5, range: 2.3, splash: 0.95 },
   { name: "Мороз", desc: "Сповільнює ціль і тих, хто поруч", cost: 70, dmg: 5, rate: 1.0, range: 2.2, splash: 0.8, slowDur: 1.6 },
   { name: "Тесла", desc: "Блискавка перескакує на 3 цілі", cost: 140, dmg: 20, rate: 1.1, range: 2.4, chain: 3, chainRange: 1.7 },
+  // Support towers do not shoot. They strengthen every shooting tower on the 8 cells around them, whoever's
+  // it is; several of the same kind around one tower do not add up, the strongest counts.
+  { name: "Маяк", desc: "Не стріляє. Вежі поруч бачать далі", cost: 60, dmg: 0, rate: 0, range: 0, support: "range", aura: [0.2, 0.3, 0.4] },
+  { name: "Стяг", desc: "Не стріляє. Вежі поруч б’ють сильніше", cost: 80, dmg: 0, rate: 0, range: 0, support: "dmg", aura: [0.2, 0.3, 0.4] },
+  { name: "Відлуння", desc: "Не стріляє. Вежі поруч часом б’ють двічі", cost: 90, dmg: 0, rate: 0, range: 0, support: "multi", aura: [0.15, 0.25, 0.35] },
 ];
+/** Tower types that shoot, and support types that strengthen their neighbours. */
+export const isSupport = ty => !!(TOWERS[ty] && TOWERS[ty].support);
+export const SUPPORT_KINDS = ["range", "dmg", "multi"];
+/**
+ * What the support towers on the 8 cells around a shooting tower give it: { range, dmg, multi } as
+ * fractions (0.25 = +25% range, +25% damage, 25% chance to attack twice), or null if nothing.
+ */
+export function auraAt(towers, tw) {
+  if (isSupport(tw.ty)) return null;
+  const x = tw.c % COLS, y = (tw.c / COLS) | 0;
+  let out = null;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    if (!dx && !dy) continue;
+    const nx = x + dx, ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+    const nb = towers.get(ny * COLS + nx);
+    if (!nb || !isSupport(nb.ty)) continue;
+    const d = TOWERS[nb.ty], v = d.aura[nb.lv - 1];
+    out = out || { range: 0, dmg: 0, multi: 0 };
+    if (v > out[d.support]) out[d.support] = v;
+  }
+  return out;
+}
 export const ENEMIES = [
   { name: "Пішак", hp: 34, speed: 1.15, gold: 3, leak: 1, r: 0.27 },
   { name: "Бігун", hp: 20, speed: 2.0, gold: 3, leak: 1, r: 0.24 },

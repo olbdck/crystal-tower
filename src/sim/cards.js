@@ -50,6 +50,12 @@ export function towerStatsFor(ty, lv, pv) {
   if (ty === 3 && has(pv, "arc")) s.chain += 1;
   return s;
 }
+/** Adds the auras of support towers around a shooting tower to its stats (see auraAt in the rules). */
+export function withAura(s, a) {
+  s.multi = 0;
+  if (a) { s.range *= 1 + a.range; s.dmg *= 1 + a.dmg; s.multi = a.multi; }
+  return s;
+}
 /** What a player with these passives pays and gets back. Discounts and refunds never add up to a profit. */
 export function buildCost(pv, ty) { return ty === 0 && has(pv, "archer") ? Math.round(TOWERS[0].cost * 0.8) : TOWERS[ty].cost; }
 export function upCost(pv, ty, lv) { const c = upgradeCost(ty, lv); return has(pv, "craft") ? Math.round(c * 0.8) : c; }

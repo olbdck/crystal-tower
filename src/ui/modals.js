@@ -18,6 +18,7 @@ export function openSyn() {
     for (const h of ["Вежа", "Що посилює", "Без", "+30%", "+60%"]) { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); }
     const body = tb.createTBody();
     TOWERS.forEach((t, i) => {
+      if (t.support) return; // support towers do not shoot
       const r = body.insertRow(), dmg = towerStats(i, 1).dmg;
       const c0 = r.insertCell(); c0.className = "tname"; c0.textContent = t.name;
       r.insertCell().textContent = what[i];

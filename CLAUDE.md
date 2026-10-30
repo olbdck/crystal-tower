@@ -25,7 +25,7 @@ PERF=1 npx playwright test tests/e2e/perf.spec.js   # render benchmark (draw cal
 
 | Path | Role |
 |---|---|
-| `src/sim/rules.js` | Board, paths, towers, enemies, waves, prices. Pure data and functions. |
+| `src/sim/rules.js` | Board, paths, towers (4 shooting, 3 support with auras: `auraAt`), enemies, waves, prices. Pure data and functions. |
 | `src/sim/sim.js` | The deterministic simulation (`Sim`): seats, actions, ticks, combat, cards, `stateHash()`. |
 | `src/sim/cards.js` | Passive cards and spells: data, stat/price modifiers, the deterministic draw of offers. |
 | `src/net/transport.js` | WebRTC mesh + MQTT: presence (JSON, channel "game") and the game stream (binary, channel "ev"). |
@@ -35,6 +35,7 @@ PERF=1 npx playwright test tests/e2e/perf.spec.js   # render benchmark (draw cal
 | `src/net/view.js` | `getView(now)`: what the renderer and HUD draw, interpolated between ticks. |
 | `src/render/` | Scene, models, instancing (towers/enemies as InstancedMesh), pooled effects, overlay, portraits. |
 | `src/audio/` | Synthesised sound effects (`sound.js`) and which game moment plays which (`cues.js`). |
+| `src/ui/hand.js` | The fanned hand of cards (layout by count, hover spread); a scrolling row on phones. |
 | `src/ui/` | HUD, input, join screen, modals, cards (`ui/cards.js`: the pick dialog, spells in hand, passive icons), pause (`ui/pause.js`, with the rule facts; keep them true when rules change). |
 | `src/state.js` | Shared runtime state `S` of the tab. |
 | `tests/unit/` | Rules, simulation, stream (host vs copy stays identical), balance. |

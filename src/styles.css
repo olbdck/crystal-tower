@@ -292,12 +292,22 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 .card.t1 { --glow: #b4552a; --rib-hi: #a24526; --rib-lo: #5e2412; }
 .card.t2 { --glow: #3b8dc4; --rib-hi: #2f7cb4; --rib-lo: #164466; }
 .card.t3 { --glow: #7b4fd6; --rib-hi: #6c3fc6; --rib-lo: #35196e; }
-.hand .card:nth-child(1) { transform: rotate(-9deg) translateY(10px); }
-.hand .card:nth-child(2) { transform: rotate(-3deg) translateY(3px); }
-.hand .card:nth-child(3) { transform: rotate(3deg) translateY(3px); }
-.hand .card:nth-child(4) { transform: rotate(9deg) translateY(10px); }
-.card:hover:not(:disabled), .card:focus-visible { transform: translateY(-36px) scale(1.13); z-index: 6; }
-.card.sel { transform: translateY(-30px) scale(1.09); z-index: 5; }
+.card.t4 { --glow: #d9a520; --rib-hi: #c98f1c; --rib-lo: #6e4a0c; }
+.card.t5 { --glow: #c23a2e; --rib-hi: #b0302a; --rib-lo: #5c1410; }
+.card.t6 { --glow: #b45fd8; --rib-hi: #9d48c4; --rib-lo: #4d1a6a; }
+.card.support .face { background: linear-gradient(180deg, #f3f0dc, #ddd6b4 55%, #c4b98e); }
+.card .stats .near { font-size: 11px; font-style: italic; }
+/* the hand: a fan along an arc (layout in ui/hand.js sets --rot, --dy, --ml; --push moves neighbours aside) */
+.hand .card {
+  margin-left: var(--ml, 0px);
+  transform: translateX(var(--push, 0px)) translateY(var(--dy, 0px)) rotate(var(--rot, 0deg));
+  transition: transform .2s ease, margin-left .25s ease, filter .18s ease;
+}
+.hand .card:hover:not(:disabled), .hand .card:focus-visible { transform: translateX(var(--push, 0px)) translateY(-40px) scale(1.14); z-index: 60; }
+.hand .card.sel { transform: translateX(var(--push, 0px)) translateY(-30px) scale(1.08); z-index: 55; }
+.hand .card.spell.idle:not(:hover) .face { filter: saturate(.55) brightness(.8); }
+.hand .card.spell .txt { font-size: 10.5px; }
+.offer .card:hover:not(:disabled), .offer .card:focus-visible { z-index: 6; }
 .card:disabled { cursor: default; filter: grayscale(.7) brightness(.72); }
 .card .face {
   position: absolute; inset: 0; border-radius: 13px; overflow: hidden; display: flex; flex-direction: column; align-items: center;
@@ -348,14 +358,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 .cardx .kind { margin-top: auto; margin-bottom: 7px; font-family: var(--font-label); font-size: 11.5px; color: var(--ink-soft); }
 .cardx.spell .face { background: linear-gradient(180deg, #efe4ff, #d9c6f2 55%, #bfa6e0); }
 .cardx.spell kbd { color: #4b2f7a; }
-.spells { display: flex; align-items: flex-end; pointer-events: none; padding-top: 34px; padding-bottom: 20px; margin-left: -8px; }
-.spells .card { width: 104px; margin: 0 -5px; }
-.spells .card:nth-child(1) { transform: rotate(-4deg) translateY(6px); }
-.spells .card:nth-child(3) { transform: rotate(4deg) translateY(6px); }
-.spells .card.idle:not(:hover) .face { filter: saturate(.55) brightness(.8); }
-.spells .card .txt { font-size: 10.5px; }
-.spells .card .ribbon { font-size: 12.5px; }
-.spells .card .kind { display: none; }
 .offer { display: flex; justify-content: center; gap: 18px; flex-wrap: wrap; padding: 22px 0 8px; }
 .offer .card.big { width: 158px; margin: 0; }
 .offer .card.big .txt { font-size: 12.5px; }
@@ -451,8 +453,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
   .ui {
     gap: 6px; padding-block: 6px 4px;
     grid-template-columns: auto minmax(0, 1fr) auto;
-    grid-template-rows: auto auto minmax(0, 1fr) auto auto auto auto;
-    grid-template-areas: "top top top" "party party party" "space space space" "sel sel sel" "spells spells spells" "purse . ready" "hand hand hand";
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
+    grid-template-areas: "top top top" "party party party" "space space space" "sel sel sel" "purse . ready" "hand hand hand";
   }
   .topbar { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding-bottom: 0; }
   .plaque { padding: 5px 9px; }
@@ -493,20 +495,18 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
   .ready { grid-area: ready; width: auto; height: 44px; border-radius: 22px; padding: 0 20px; flex-direction: row; gap: 8px; box-shadow: 0 0 0 3px var(--wood-1), 0 0 0 5px var(--gold-0), inset 0 -6px 10px rgba(80, 40, 0, .5), 0 8px 16px rgba(0, 0, 0, .6); }
   .ready .lbl { font-size: 17px; }
   .ready.on { box-shadow: 0 0 0 3px var(--wood-1), 0 0 0 5px var(--gold-0), 0 0 18px 3px rgba(111, 210, 90, .6); }
-  .hand { grid-area: hand; padding-top: 18px; padding-bottom: 14px; }
-  .card { width: min(92px, 23vw); margin: 0 -3px; }
+  /* phones: the hand is a row that scrolls sideways */
+  .hand { grid-area: hand; padding: 18px 4px 14px; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; pointer-events: auto; scrollbar-width: none; }
+  .card { width: min(92px, 23vw); margin: 0 3px; flex: none; scroll-snap-align: start; }
+  .hand .card { margin-left: 3px; transform: none; }
+  .hand .card:hover:not(:disabled), .hand .card:focus-visible { transform: translateY(-14px); }
+  .hand .card.sel { transform: translateY(-12px); }
   .card .txt { display: none; }
   .card .ribbon { font-size: 12px; margin-top: -8px; }
   .card .stats { font-size: 10.5px; gap: 5px; margin-bottom: 5px; }
   .card .cost { width: 30px; height: 30px; font-size: 13.5px; left: -7px; top: -7px; }
   .card kbd { display: none; }
   .relics { display: none; }
-  .spells { grid-area: spells; justify-self: end; align-self: center; padding: 0; margin: 0; gap: 8px; }
-  .spells .card, .spells .card:nth-child(n) { width: 50px; margin: 0; transform: none; }
-  .spells .card .ribbon, .spells .card .txt, .spells .card .kind, .spells .card .need { display: none; }
-  .spells .card .art { width: 100%; height: 100%; margin: 0; border-radius: 10px; aspect-ratio: auto; }
-  .spells .card .cost { width: 24px; height: 24px; font-size: 11.5px; left: -6px; top: -6px; }
-  .spells .card.sel { transform: translateY(-6px) scale(1.06); }
   .offer { gap: 8px; padding-top: 14px; }
   .offer .card.big { width: min(31vw, 132px); }
   .offer .card.big .txt { display: block; font-size: 10.5px; padding: 3px 5px 0; }

@@ -33,6 +33,8 @@ export function initMaterials() {
   MAT.copper = std(0xcf7b3c, { r: 0.35, m: 0.85 });
   MAT.ice = std(0xd2f4ff, { r: 0.08, e: 0x2c9be8, ei: 0.8, t: true, op: 0.9, flat: true });
   MAT.spark = std(0xeee6ff, { r: 0.2, e: 0x9a6bff, ei: 1.7 });
+  MAT.beacon = std(0xfff0b8, { r: 0.2, e: 0xffb020, ei: 1.8 });
+  MAT.echo = std(0xe2d2ff, { r: 0.12, e: 0x8f4dff, ei: 1.2, t: true, op: 0.92, flat: true });
   MAT.shadow = std(0x4b3d5e, { r: 0.5, m: 0.1, e: 0x2c1244, flat: true });
   MAT.runner = std(0x8a3129, { r: 0.55, e: 0x3a0c06, flat: true });
   MAT.armor = std(0x868b96, { r: 0.38, m: 0.7, flat: true });
