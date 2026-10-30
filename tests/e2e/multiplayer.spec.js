@@ -226,3 +226,29 @@ test("when everyone agrees, the rest of the wave plays out at once and copies st
   expect(a.errors).toEqual([]); expect(b.errors).toEqual([]);
   await a.context.close(); await b.context.close();
 });
+
+test("double speed starts when everyone asks for it, for every player", async ({ browser }) => {
+  const a = await openGame(browser);
+  await sitDown(a.page, "Олег");
+  await waitView(a.page, v => v.host);
+  const hash = new URL(await a.page.evaluate(() => window.__kv.inviteLink())).hash;
+  const b = await openGame(browser, { path: "/" + hash });
+  await sitDown(b.page, "Марко");
+  await waitView(b.page, v => v.mySeat === 1);
+  const rate = async page => {
+    const t0 = await page.evaluate(() => window.__kv.S.sim.t);
+    await page.waitForTimeout(2000);
+    return ((await page.evaluate(() => window.__kv.S.sim.t)) - t0) / 2;
+  };
+  await a.page.keyboard.press("KeyX");
+  await a.page.waitForTimeout(500);
+  expect(await rate(a.page)).toBeLessThan(40);
+  await b.page.click("#speedBtn");
+  await a.page.waitForFunction(() => window.__kv.S.sim.speed() === 2);
+  await expect(b.page.locator("#speedBtn")).toHaveText("×2");
+  const [ra, rb] = await Promise.all([rate(a.page), rate(b.page)]);
+  expect(ra).toBeGreaterThan(50);
+  expect(rb).toBeGreaterThan(50);
+  expect((await b.page.evaluate(() => window.__kv.hostDebug())).follow.resyncs).toBe(0);
+  await a.context.close(); await b.context.close();
+});

@@ -20,6 +20,7 @@ export class Sim {
     this.ph = 1; this.w = 0; this.l = START_LIVES; this.tm = -1; this.sp = 0; this.sc = 0; this.pc = 1; this.hs = 1; this.wt = 0;
     this.bk = START_GOLD; this.u = 0; this.pz = 0; // pz: seat+1 of the player who paused the game, 0 = running
     this.sk = 0; // seats (bits) that want to finish the current wave at once
+    this.fw = 0; // seats (bits) that want the game at double speed
     this.seats = seats.slice();
     this.gold = [0, 0, 0, 0, 0].map(() => START_GOLD);
     this.kills = [0, 0, 0, 0, 0];
@@ -66,6 +67,7 @@ export class Sim {
   }
   clearCards(i) {
     if (this.pz === i + 1) this.pz = 0; // a pause by a player who is gone for good ends
+    this.fw &= ~(1 << i); this.sk &= ~(1 << i);
     const had = this.pv[i];
     this.pv[i] = 0; this.hand[i] = []; this.offer[i] = []; this.gr[i] = 0;
     if (had) this.recomputeSyn();
@@ -86,6 +88,12 @@ export class Sim {
     const occ = this.present();
     return occ.length > 0 && occ.every(i => this.sk & (1 << i));
   }
+  /** Game speed: 2 when everyone at the table asked for double speed, else 1. Hosts and copies pace ticks by it. */
+  speed() {
+    if (!this.fw) return 1;
+    const occ = this.present();
+    return occ.length > 0 && occ.every(i => this.fw & (1 << i)) ? 2 : 1;
+  }
   /** Seats whose player is at the table right now (not away). */
   present() { return this.occupied().filter(i => !this.gone.has(this.seats[i])); }
   recomputeSyn() {
@@ -95,6 +103,7 @@ export class Sim {
   apply(seat, it) {
     const code = it[1];
     if (code === "p") { if (this.ph <= 2) this.pz = it[2] ? seat + 1 : 0; return; }
+    if (code === "x") { this.fw = it[2] ? this.fw | (1 << seat) : this.fw & ~(1 << seat); return; }
     if (code === "f") { if (this.ph === 2) this.sk = it[2] ? this.sk | (1 << seat) : this.sk & ~(1 << seat); return; }
     // a paused wave stands still: no building, upgrading, selling or spells until it goes on
     if (this.pz && this.ph === 2 && (code === "b" || code === "u" || code === "s" || code === "m")) return;
@@ -326,7 +335,7 @@ export class Sim {
   /** A checksum of the whole game state. Copies compare it with the host's to catch any divergence. */
   stateHash() {
     let h = 2166136261 | 0;
-    for (const x of [this.t, this.ph, this.w, this.l, this.tm, this.sp, this.sc, this.pc, this.hs, this.bk, this.u, this.nid, this.wt, this.pz, this.sk]) h = mix(h, x);
+    for (const x of [this.t, this.ph, this.w, this.l, this.tm, this.sp, this.sc, this.pc, this.hs, this.bk, this.u, this.nid, this.wt, this.pz, this.sk, this.fw]) h = mix(h, x);
     for (let i = 0; i < MAX_SEATS; i++) {
       h = mix(h, this.gold[i]); h = mix(h, this.kills[i]); h = mix(h, this.ready[i] ? 1 : 0); h = mix(h, this.pv[i]); h = mix(h, this.gr[i]);
       for (const c of this.hand[i]) h = mix(h, c + 100);

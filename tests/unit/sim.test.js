@@ -194,3 +194,15 @@ test("a wave is finished at once only when everyone at the table agrees", () => 
   assert.equal(sim.ph, 1, "the wave is over");
   assert.equal(sim.sk, 0, "votes reset for the next wave");
 });
+
+test("double speed needs everyone at the table", () => {
+  const sim = table(2);
+  act(sim, 0, "x", 1);
+  assert.equal(sim.speed(), 1);
+  act(sim, 1, "x", 1);
+  assert.equal(sim.speed(), 2);
+  sim.t++; sim.setRoster(["p0"]);
+  assert.equal(sim.speed(), 2, "players who are away do not count");
+  act(sim, 0, "x", 0);
+  assert.equal(sim.speed(), 1);
+});

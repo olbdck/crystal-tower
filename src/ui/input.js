@@ -8,7 +8,7 @@ import { pickCell, glCanvas } from "../render/scene.js";
 import { portrait } from "../render/portraits.js";
 import { mySeat, myGold, myPv, myOffer, canBuildAt } from "../game.js";
 import { selectSpell, castAt, openOffer } from "./cards.js";
-import { togglePause } from "./pause.js";
+import { togglePause, toggleSpeed } from "./pause.js";
 import { S } from "../state.js";
 import { $, ICON, toast } from "./dom.js";
 import { closeTopModal } from "./modals.js";
@@ -157,6 +157,7 @@ export function initInput() {
     else if (e.code === "KeyS") doSell();
     else if (e.code === "KeyR") doReady();
     else if (e.code === "KeyP") togglePause();
+    else if (e.code === "KeyX") toggleSpeed();
     else if (e.code === "KeyF") { const v = getView(performance.now()), seat = mySeat(v); if (v && seat >= 0 && v.ph === 2 && !v.pz) finishWave(v, seat); }
   });
 }

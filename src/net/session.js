@@ -42,7 +42,7 @@ export const netStats = { in: 0, out: 0, inMsgs: 0, outMsgs: 0 };
 
 /** Progress into the current tick, 0..1, for smooth rendering between ticks. */
 export function viewAlpha(now) {
-  if (S.isHost) return Math.min(1, (hostAcc + Math.max(0, now - lastHostTime)) / STEP_MS);
+  if (S.isHost) return Math.min(1, (hostAcc + Math.max(0, now - lastHostTime) * (S.sim ? S.sim.speed() : 1)) / STEP_MS);
   return follower.alpha(now);
 }
 
@@ -335,7 +335,7 @@ function countOut(bytes) { netStats.out += bytes.length; netStats.outMsgs++; }
 function hostLoop() {
   if (!S.isHost || !rec) return;
   const now = performance.now();
-  hostAcc += Math.min(now - lastHostTime, 3000); lastHostTime = now;
+  hostAcc += Math.min(now - lastHostTime, 3000) * S.sim.speed(); lastHostTime = now;
   const list = S.room.peers();
   syncRoster(list);
   processActions(list);

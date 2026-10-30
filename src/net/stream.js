@@ -155,14 +155,16 @@ export class Follower {
       this.quiet = true; this.play(this.ticksQueued - this.buffer); this.quiet = false;
       this.acc = 0; this.buffering = false;
     }
+    // at double speed (everyone asked for it) ticks are played twice as fast and the buffer holds twice as many
+    const sp = this.sim.speed();
     if (this.buffering) {
       this.play(0);
-      if (this.ticksQueued < this.buffer) return;
+      if (this.ticksQueued < this.buffer * sp) return;
       this.buffering = false; this.acc = STEP_MS;
     }
-    this.acc += dt;
+    this.acc += dt * sp;
     let due = Math.floor(this.acc / STEP_MS);
-    if (due > 0 && this.ticksQueued > this.buffer + 3) due++; // a little ahead of the buffer: speed up gently
+    if (due > 0 && this.ticksQueued > this.buffer * sp + 3) due++; // a little ahead of the buffer: speed up gently
     const played = this.play(due);
     this.acc -= played * STEP_MS;
     if (this.acc < 0) this.acc = 0;
@@ -185,7 +187,7 @@ export class Follower {
   /** Progress into the current tick, 0..1, for drawing between ticks. */
   alpha(now) {
     if (!this.sim || this.buffering || this.broken) return 1;
-    return Math.min(1, (this.acc + Math.max(0, now - this.last)) / STEP_MS);
+    return Math.min(1, (this.acc + Math.max(0, now - this.last) * this.sim.speed()) / STEP_MS);
   }
   /** How far behind the newest received tick the shown game is, in ticks. */
   get lag() { return this.ticksQueued; }

@@ -14,7 +14,7 @@ import { BLOCKED, COLS, ENEMIES, MAX_SEATS, MAX_WAVES, NO_OWNER, PATHS, ROWS, TO
 
 export const MSG_KEYFRAME = 1, MSG_BATCH = 2, MSG_REQ = 3, MSG_BUNDLE = 4;
 export const OP_TICK = 1, OP_ROSTER = 2, OP_ACT = 3, OP_HASH = 4;
-const FORMAT = 6; // 2: wave timer for the crystal's gold drip; 3: cards; 4: the "Єдність" card; 5: pause; 6: finish-wave votes
+const FORMAT = 7; // 2: wave timer for the crystal's gold drip; 3: cards; 4: the "Єдність" card; 5: pause; 6: finish-wave votes; 7: speed
 const MAX_ROSTER = 32, MAX_LABEL = 24, MAX_ARGS = 3;
 
 const te = new TextEncoder(), td = new TextDecoder();
@@ -86,7 +86,7 @@ export function encodeKeyframe(sim, { e, seq, build }) {
   w.u8(sim.pc); w.f64(sim.hs); w.f64(sim.bk); w.u8(sim.u); w.uv(sim.nid);
   let r = 0;
   for (let i = 0; i < MAX_SEATS; i++) if (sim.ready[i]) r |= 1 << i;
-  w.u8(r); w.u8(sim.pz); w.u8(sim.sk);
+  w.u8(r); w.u8(sim.pz); w.u8(sim.sk); w.u8(sim.fw);
   for (let i = 0; i < MAX_SEATS; i++) {
     w.str(sim.seats[i]); w.f64(sim.gold[i]); w.uv(sim.kills[i]);
     w.uv(sim.pv[i]); w.f64(sim.gr[i]);
@@ -116,7 +116,7 @@ export function decodeKeyframe(bytes) {
   m.pc = r.u8(); m.hs = r.f64(); m.bk = r.f64(); m.u = r.u8(); m.nid = r.uv();
   if (![1, 2, 3, 4].includes(m.ph) || m.w > MAX_WAVES || m.pc < 1 || m.pc > MAX_SEATS) throw new RangeError("bad state");
   const rb = r.u8();
-  m.pz = r.u8(); m.sk = r.u8();
+  m.pz = r.u8(); m.sk = r.u8(); m.fw = r.u8();
   if (m.pz > MAX_SEATS) throw new RangeError("bad pause");
   const cards = (n, max, limit) => {
     if (n > limit) throw new RangeError("bad cards");

@@ -1,10 +1,12 @@
+// Table controls next to the help button.
 // Pause: any seated player can stop the game (button or P) and anyone seated can resume it.
 // While paused, a sign shows who paused and a fact from the rules.
+// Speed: each player asks for double speed (button or X); the game runs at x2 once everyone at the table asks.
 import { S } from "../state.js";
 import { act, nameOfPeer } from "../net/session.js";
 import { getView } from "../net/view.js";
 import { mySeat } from "../game.js";
-import { $ } from "./dom.js";
+import { $, toast } from "./dom.js";
 
 // Keep these true to src/sim/rules.js and src/sim/cards.js when the rules change.
 export const FACTS = [
@@ -52,8 +54,34 @@ export function togglePause() {
   S.uiDirty = true;
 }
 
+const wantsFast = (v, seat) => {
+  const pending = [...S.queue].reverse().find(q => q[1] === "x");
+  return pending ? !!pending[2] : !!(v.fw & (1 << seat));
+};
+export function toggleSpeed() {
+  const v = getView(performance.now()), seat = mySeat(v);
+  if (!v || seat < 0 || v.ph > 2) return;
+  const want = !wantsFast(v, seat);
+  act("x", want ? 1 : 0);
+  if (want && v.seats.filter(Boolean).length > 1) toast("Подвійна швидкість увімкнеться, коли всі за столом погодяться");
+  S.uiDirty = true;
+}
+function updateSpeed(v) {
+  const b = $("speedBtn"), seat = mySeat(v);
+  b.hidden = !v || seat < 0 || v.ph > 2;
+  if (b.hidden) return;
+  const fast = v.speed, mine = wantsFast(v, seat);
+  const n = v.seats.reduce((a, s, i) => a + (s && v.fw & (1 << i) ? 1 : 0), 0), all = v.seats.filter(Boolean).length;
+  b.textContent = fast === 2 ? "×2" : "×1";
+  b.classList.toggle("on", fast === 2);
+  b.classList.toggle("wait", mine && fast !== 2);
+  b.title = fast === 2 ? "Подвійна швидкість (X), натисніть, щоб повернути звичайну"
+    : mine ? `Ви за подвійну швидкість, чекаємо інших: ${n}/${all} (X)` : `Подвійна швидкість (X)${n ? `: за ${n}/${all}` : ""}`;
+}
+
 /** Called by the HUD on every update. */
 export function updatePause(v) {
+  updateSpeed(v);
   const paused = !!(v && v.pz && v.ph <= 2);
   $("pauseBtn").hidden = !v || mySeat(v) < 0 || v.ph > 2;
   $("pauseBtn").classList.toggle("on", paused);
@@ -71,6 +99,7 @@ export function updatePause(v) {
 
 export function initPause() {
   $("pauseBtn").addEventListener("click", togglePause);
+  $("speedBtn").addEventListener("click", toggleSpeed);
   $("pauseGo").addEventListener("click", togglePause);
   $("pauseFactNext").addEventListener("click", nextFact);
 }
