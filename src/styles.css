@@ -206,6 +206,15 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 .linkbtn { border: 0; background: none; padding: 0; cursor: pointer; color: #6a3fc0; font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 2px; text-align: left; }
 .linkbtn:hover { color: #4a22a8; }
 .sign.wide { width: min(620px, 100%); }
+.endstats { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.endstats th { font-family: var(--font-label); font-weight: 600; font-size: 12px; color: var(--ink-soft); padding: 4px 6px; text-align: right; }
+.endstats td { padding: 5px 6px; text-align: right; border-top: 1px solid rgba(120, 80, 30, .25); }
+.endstats th:first-child, .endstats td.who { text-align: left; }
+.endstats td.who { white-space: nowrap; font-weight: 600; }
+.endstats td.who i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--c); margin-right: 6px; box-shadow: 0 0 0 1px var(--wood-0); }
+.endstats tr.me td { background: rgba(241, 205, 106, .22); }
+.endstats td.top { color: #7a5317; font-weight: 700; }
+.endstats td.top::before { content: "★ "; font-size: .8em; }
 .syn-diagram { width: 100%; max-width: 440px; height: auto; align-self: center; }
 .syn-diagram text { font-family: var(--font-label); }
 .tablewrap { overflow-x: auto; }

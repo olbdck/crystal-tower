@@ -27,6 +27,10 @@ export class Sim {
     this.ready = [false, false, false, false, false];
     // cards: passive bitmask, spells in hand, the pick on offer (card codes), gold rush seconds left
     this.pv = [0, 0, 0, 0, 0]; this.hand = [[], [], [], [], []]; this.offer = [[], [], [], [], []]; this.gr = [0, 0, 0, 0, 0];
+    // for the summary after the game: damage dealt, gold earned and given, towers built, spells cast per seat,
+    // lives lost, and the tower that dealt the most damage (also if it was sold)
+    this.dmg = [0, 0, 0, 0, 0]; this.earn = [0, 0, 0, 0, 0]; this.gave = [0, 0, 0, 0, 0]; this.built = [0, 0, 0, 0, 0]; this.casts = [0, 0, 0, 0, 0];
+    this.lost = 0; this.best = { ty: -1, lv: 0, o: -1, dm: 0 };
     for (let i = 0; i < MAX_SEATS; i++) if (this.seats[i]) this.u |= 1 << i;
     this.towers = new Map(); this.enemies = []; this.nid = 1; this.syn = new Map(); this.tv = (this.tv || 0) + 1;
   }
@@ -60,6 +64,7 @@ export class Sim {
         this.u |= 1 << free;
         this.gold[free] = this.w > 0 ? Math.max(START_GOLD, Math.round(this.bk * 0.6)) : START_GOLD;
         this.kills[free] = 0; this.clearCards(free);
+        this.dmg[free] = 0; this.earn[free] = 0; this.gave[free] = 0; this.built[free] = 0; this.casts[free] = 0;
       }
     }
     for (const k of [...this.ak.keys()]) if (expired(k)) this.ak.delete(k);
@@ -115,7 +120,8 @@ export class Sim {
       if (this.gold[seat] < cost) return;
       this.gold[seat] -= cost;
       // fr: gold its owner paid during the current break; while it is set, selling gives all of it back
-      this.towers.set(cell, { c: cell, ty, lv: 1, o: seat, cd: 0, bt: 0, fr: this.ph === 1 ? cost : 0 }); this.tv++;
+      this.towers.set(cell, { c: cell, ty, lv: 1, o: seat, cd: 0, bt: 0, fr: this.ph === 1 ? cost : 0, dm: 0 }); this.tv++;
+      this.built[seat]++;
       this.recomputeSyn();
     } else if (code === "u") {
       const tw = this.towers.get(it[2]);
@@ -129,6 +135,7 @@ export class Sim {
       if (!tw || tw.o !== seat || this.ph > 2) return;
       // built (and upgraded) during this break: undo with every coin back; otherwise the usual sale
       this.gold[seat] += this.ph === 1 && tw.fr > 0 ? tw.fr : sellFor(this.pv[seat], tw.ty, tw.lv);
+      this.noteBest(tw);
       this.towers.delete(tw.c); this.recomputeSyn(); this.tv++;
     } else if (code === "r") {
       // a card on offer must be picked before getting ready
@@ -137,7 +144,7 @@ export class Sim {
       const to = it[2];
       if (!Number.isInteger(to) || to < 0 || to >= MAX_SEATS || to === seat || !this.seats[to]) return;
       if (this.gold[seat] < GIFT) return;
-      this.gold[seat] -= GIFT; this.gold[to] += GIFT;
+      this.gold[seat] -= GIFT; this.gold[to] += GIFT; this.gave[seat] += GIFT;
     } else if (code === "n") {
       if (this.ph >= 3) this.reset(this.seats);
     } else if (code === "k") {
@@ -191,7 +198,7 @@ export class Sim {
       this.gr[seat] = sp.time;
       this.fx(6, CRYSTAL.x + 0.5, CRYSTAL.y + 0.5, id, 10);
     }
-    this.gold[seat] -= sp.cost;
+    this.gold[seat] -= sp.cost; this.casts[seat]++;
     hand.splice(idx, 1);
   }
   step(dt) {
@@ -212,14 +219,18 @@ export class Sim {
     this.hs = hpScale(this.w, this.pc);
     this.ready.fill(false);
   }
-  /** Adds gold, kept to whole cents so shared fractions never show up as 49.999... */
-  addGold(i, x) { this.gold[i] = Math.round((this.gold[i] + x) * 100) / 100; }
+  /** Adds earned gold, kept to whole cents so shared fractions never show up as 49.999... */
+  addGold(i, x) { this.gold[i] = Math.round((this.gold[i] + x) * 100) / 100; this.earn[i] += x; }
+  /** Remembers the tower with the most damage, for the summary. */
+  noteBest(tw) { if (tw.dm > this.best.dm) this.best = { ty: tw.ty, lv: tw.lv, o: tw.o, dm: tw.dm }; }
+  /** The best tower of the game so far, including towers still standing. */
+  bestTower() { let b = this.best; for (const tw of this.towers.values()) if (tw.dm > b.dm) b = tw; return b.dm > 0 ? b : null; }
   waveTick(dt) {
     const total = waveTotal(this.w, this.pc);
     // the crystal's drip: 1 gold a second to every seat, until half of the wave bonus is paid
     this.wt++;
     if (this.wt % DRIP_EVERY === 0 && this.wt / DRIP_EVERY <= dripCap(this.w)) {
-      for (const i of this.occupied()) this.gold[i] += 1;
+      for (const i of this.occupied()) this.addGold(i, 1);
       this.fx(5, CRYSTAL.x + 0.5, CRYSTAL.y + 0.5, 1, 0);
     }
     if (this.sp < total) {
@@ -241,7 +252,7 @@ export class Sim {
       if (e.d >= PATHS[e.ln].len) { e.dead = true; e.leak = true; leaked += ENEMIES[e.ty].leak; }
       else { const p = posAt(e.ln, e.d); e.x = p[0]; e.y = p[1]; }
     }
-    if (leaked) this.l -= leaked;
+    if (leaked) { this.l -= leaked; this.lost += leaked; }
     for (let i = 0; i < MAX_SEATS; i++) if (this.gr[i] > 0) this.gr[i] = Math.max(0, this.gr[i] - dt);
     for (const tw of this.towers.values()) { if (tw.bt > 0) tw.bt = Math.max(0, tw.bt - dt); this.fire(tw, dt); }
     const alive = [];
@@ -262,7 +273,7 @@ export class Sim {
     if (this.sp >= total && !this.enemies.length) {
       // the rest of the wave bonus (the crystal dripped the first part during the wave)
       const bonus = waveBonus(this.w), dripped = Math.min(dripCap(this.w), Math.floor(this.wt / DRIP_EVERY));
-      for (const i of this.occupied()) this.gold[i] += bonus - dripped;
+      for (const i of this.occupied()) this.addGold(i, bonus - dripped);
       this.bk += bonus;
       this.gr.fill(0); this.sk = 0;
       for (const tw of this.towers.values()) tw.bt = 0;
@@ -273,8 +284,11 @@ export class Sim {
       }
     }
   }
-  hit(e, dmg, owner) {
+  hit(e, dmg, owner, tw) {
     if (e.dead) return;
+    const done = Math.min(dmg, e.hp);
+    if (owner >= 0) this.dmg[owner] += done;
+    if (tw) tw.dm += done;
     e.hp -= dmg;
     if (e.hp <= 0) { e.dead = true; e.killer = owner; }
   }
@@ -296,7 +310,7 @@ export class Sim {
     const dmg = s.dmg * (1 + SYN_BONUS * (this.syn.get(tw.c) || 0)), o = tw.o;
     if (tw.ty === 0) {
       this.fx(0, cx, cy, best.x, best.y);
-      this.hit(best, dmg, o);
+      this.hit(best, dmg, o, tw);
     } else if (tw.ty === 1 || tw.ty === 2) {
       const bx = best.x, by = best.y, sr2 = s.splash * s.splash;
       this.fx(tw.ty, cx, cy, bx, by);
@@ -305,7 +319,7 @@ export class Sim {
         const dx = e.x - bx, dy = e.y - by;
         if (e !== best && dx * dx + dy * dy > sr2) continue;
         if (tw.ty === 2) e.sl = Math.max(e.sl, s.slowDur);
-        this.hit(e, e === best ? dmg : dmg * (tw.ty === 1 ? 0.55 : 0.5), o);
+        this.hit(e, e === best ? dmg : dmg * (tw.ty === 1 ? 0.55 : 0.5), o, tw);
       }
     } else {
       const hitSet = new Set(), cr2 = s.chainRange * s.chainRange;
@@ -314,7 +328,7 @@ export class Sim {
         hitSet.add(target);
         const tx = target.x, ty = target.y;
         this.fx(3, fx0, fy0, tx, ty);
-        this.hit(target, dd, o);
+        this.hit(target, dd, o, tw);
         fx0 = tx; fy0 = ty; dd *= 0.75; k++;
         let nb = null, nd = Infinity;
         for (const e of this.enemies) {
@@ -339,15 +353,16 @@ export class Sim {
   /** A checksum of the whole game state. Copies compare it with the host's to catch any divergence. */
   stateHash() {
     let h = 2166136261 | 0;
-    for (const x of [this.t, this.ph, this.w, this.l, this.tm, this.sp, this.sc, this.pc, this.hs, this.bk, this.u, this.nid, this.wt, this.pz, this.sk, this.fw]) h = mix(h, x);
+    for (const x of [this.t, this.ph, this.w, this.l, this.tm, this.sp, this.sc, this.pc, this.hs, this.bk, this.u, this.nid, this.wt, this.pz, this.sk, this.fw, this.lost, this.best.dm]) h = mix(h, x);
     for (let i = 0; i < MAX_SEATS; i++) {
       h = mix(h, this.gold[i]); h = mix(h, this.kills[i]); h = mix(h, this.ready[i] ? 1 : 0); h = mix(h, this.pv[i]); h = mix(h, this.gr[i]);
+      h = mix(h, this.dmg[i]); h = mix(h, this.earn[i]); h = mix(h, this.gave[i]); h = mix(h, this.built[i]); h = mix(h, this.casts[i]);
       for (const c of this.hand[i]) h = mix(h, c + 100);
       for (const c of this.offer[i]) h = mix(h, c + 200);
       const st = this.seats[i];
       for (let k = 0; k < st.length; k++) h = Math.imul(h ^ st.charCodeAt(k), 16777619);
     }
-    for (const tw of this.towers.values()) { h = mix(h, tw.c); h = mix(h, tw.ty * 4 + tw.lv); h = mix(h, tw.o); h = mix(h, tw.cd); h = mix(h, tw.bt); h = mix(h, tw.fr); }
+    for (const tw of this.towers.values()) { h = mix(h, tw.c); h = mix(h, tw.ty * 4 + tw.lv); h = mix(h, tw.o); h = mix(h, tw.cd); h = mix(h, tw.bt); h = mix(h, tw.fr); h = mix(h, tw.dm); }
     for (const e of this.enemies) { h = mix(h, e.id); h = mix(h, e.d); h = mix(h, e.hp); h = mix(h, e.sl); }
     return h >>> 0;
   }

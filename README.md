@@ -25,6 +25,8 @@ The **×1 / ×2** button (key `X`) asks for double speed; the game runs at ×2 o
 
 A tower you placed during the current break can be taken back for every coin you paid for it (the sell button says **«Скасувати»**) until the next wave starts; after that, selling returns 65% as usual.
 
+After the game a summary shows each player's kills, damage, gold earned, towers built, spells cast and gold given, with the best value in each column marked, and the tower that dealt the most damage.
+
 Keys: `F` finish the wave, `X` double speed, `P` pause, `1–4` towers, `5–7` spells, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
 
 ## Cards

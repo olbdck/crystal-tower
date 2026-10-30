@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Sim } from "../../src/sim/sim.js";
-import { COLS, BLOCKED, START_GOLD, TOWERS, ENEMIES, PATHS, STEP, DRIP_EVERY, upgradeCost, sellValue, synergyAt, waveTotal, waveMix, waveBonus, dripCap, posAt } from "../../src/sim/rules.js";
+import { COLS, BLOCKED, START_GOLD, START_LIVES, TOWERS, ENEMIES, PATHS, STEP, DRIP_EVERY, upgradeCost, sellValue, synergyAt, waveTotal, waveMix, waveBonus, dripCap, posAt } from "../../src/sim/rules.js";
 
 const FREE = [...BLOCKED.keys()].filter(c => !BLOCKED[c]);
 function table(n) { const s = new Sim(); s.assignSeats(Array.from({ length: n }, (_, i) => "p" + i)); return s; }
@@ -224,4 +224,17 @@ test("a tower built during the break can be undone for every coin until the wave
   const g = sim.gold[0];
   act(sim, 0, "s", b);
   assert.equal(sim.gold[0], g + sellValue(0, 1), "built before the last wave: the usual sale");
+});
+
+test("the game keeps score for the summary: damage, gold, towers and the best tower", () => {
+  const sim = table(1), cell = 5 * COLS + 4;
+  act(sim, 0, "b", cell, 0);
+  act(sim, 0, "r", 1);
+  let n = 0;
+  while ((sim.ph === 1 || sim.ph === 2) && sim.w < 2 && n++ < 30 * 300) sim.step(STEP);
+  assert.equal(sim.built[0], 1);
+  assert.ok(sim.dmg[0] > 0);
+  assert.equal(sim.bestTower().dm, sim.dmg[0], "one tower did all the damage");
+  assert.ok(sim.earn[0] >= waveBonus(1));
+  assert.equal(sim.lost, START_LIVES - sim.l);
 });

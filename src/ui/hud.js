@@ -278,15 +278,59 @@ export function updateUI(v, now) {
   const showEnd = !!v && v.ph >= 3 && $("joinOverlay").hidden;
   $("endOverlay").hidden = !showEnd;
   if (showEnd) {
-    $("endSign").className = "sign " + (v.ph === 4 ? "win" : "lose");
+    $("endSign").className = "sign wide " + (v.ph === 4 ? "win" : "lose");
     $("endTitle").textContent = v.ph === 4 ? "Перемога!" : "Кристал розбито";
-    const total = v.kills.reduce((a, b) => a + b, 0);
-    $("endText").textContent = v.ph === 4 ? `Усі ${MAX_WAVES} хвиль відбито. Команда знищила ${total} ворогів.` : `Ви дійшли до хвилі ${v.w}. Команда знищила ${total} ворогів.`;
+    const total = v.kills.reduce((a, b) => a + b, 0), min = Math.max(1, Math.round(v.time / 30 / 60));
+    $("endText").textContent = (v.ph === 4 ? `Усі ${MAX_WAVES} хвиль відбито.` : `Ви дійшли до хвилі ${v.w}.`) +
+      ` Команда знищила ${total} ворогів, ${livesText(v.lost)}. Гра тривала ${min} хв.`;
+    renderSummary(v, seat);
     $("newGameBtn").hidden = seat < 0;
   }
   if (!$("joinOverlay").hidden) updateJoinCard();
 }
 
+
+function livesText(n) {
+  if (!n) return "кристал не втратив жодного життя";
+  const few = n % 10 >= 1 && n % 10 <= 4 && !(n % 100 >= 11 && n % 100 <= 14);
+  return `кристал утратив ${n} ${few ? "життя" : "життів"}`;
+}
+// The summary table after a game: one row per seat that played, the best value of each column marked.
+let lastSummaryKey = "";
+const fmt = x => Math.round(x).toLocaleString("uk-UA");
+function renderSummary(v, seat) {
+  const seats = [0, 1, 2, 3, 4].filter(i => v.seats[i] || v.kills[i] || v.dmg[i]);
+  const key = JSON.stringify([v.ph, v.w, v.lost, seats, seats.map(i => [v.kills[i], v.dmg[i], v.gave[i]])]);
+  if (key === lastSummaryKey) return;
+  lastSummaryKey = key;
+  const cols = [
+    ["Вбивства", i => v.kills[i], String],
+    ["Шкода", i => v.dmg[i], fmt],
+    ["Золото", i => v.earn[i], fmt],
+    ["Вежі", i => v.built[i], String],
+    ["Магія", i => v.casts[i], String],
+    ["Подаровано", i => v.gave[i], String],
+  ];
+  const tb = $("endStats"); tb.textContent = "";
+  const head = tb.createTHead().insertRow();
+  for (const h of ["Гравець", ...cols.map(c => c[0])]) { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); }
+  const body = tb.createTBody();
+  for (const i of seats) {
+    const r = body.insertRow();
+    if (i === seat) r.className = "me";
+    const c0 = r.insertCell(); c0.className = "who";
+    const dot = document.createElement("i"); dot.style.setProperty("--c", SEAT_CSS[i]);
+    c0.append(dot, v.seats[i] ? nameOfPeer(v.seats[i]) : "Гравець");
+    for (const [, get, show] of cols) {
+      const c = r.insertCell(), val = get(i), top = Math.max(...seats.map(get));
+      c.textContent = show(val);
+      if (seats.length > 1 && val > 0 && val === top) c.className = "top";
+    }
+  }
+  const b = v.best;
+  $("endBest").textContent = b ? `Найкраща вежа: ${TOWERS[b.ty].name} ${"★".repeat(b.lv)}` +
+    (b.o >= 0 && v.seats[b.o] ? ` гравця ${nameOfPeer(v.seats[b.o])}` : "") + ` — ${fmt(b.dm)} шкоди` : "";
+}
 
 /** Forces the party list to rebuild, e.g. after web fonts load. */
 export function invalidateParty() { lastPartyKey = ""; }
