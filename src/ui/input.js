@@ -9,6 +9,7 @@ import { portrait } from "../render/portraits.js";
 import { mySeat, myGold, myPv, myOffer, canBuildAt } from "../game.js";
 import { selectSpell, castAt, openOffer } from "./cards.js";
 import { togglePause, toggleSpeed } from "./pause.js";
+import { playSound } from "../audio/sound.js";
 import { S } from "../state.js";
 import { $, ICON, toast } from "./dom.js";
 import { closeTopModal } from "./modals.js";
@@ -74,13 +75,13 @@ export function doUpgrade() {
   if (tw.lv >= 3) return toast("Вежа вже максимального рівня");
   const cost = upCost(myPv(v), tw.ty, tw.lv);
   if (myGold(v) < cost) return toast(`Потрібно ${cost} золота`);
-  act("u", tw.c); S.uiDirty = true;
+  act("u", tw.c); playSound("upgrade"); S.uiDirty = true;
 }
 export function doSell() {
   const v = getView(performance.now()), tw = v && v.tmap.get(S.selCell);
   if (!tw) return;
   if (tw.o !== mySeat(v)) return toast("Продати можна лише свою вежу");
-  act("s", tw.c); S.selCell = -1; S.uiDirty = true;
+  act("s", tw.c); playSound("sell"); S.selCell = -1; S.uiDirty = true;
 }
 export function doReady() {
   const v = getView(performance.now());
@@ -120,7 +121,7 @@ function onBoardClick(e) {
   if (myGold(v) < cost) { toast(`Потрібно ${cost} золота`); return; }
   if (lastPointerType === "touch" && S.armedCell !== c) { S.armedCell = c; sendHover(true); toast("Торкніться ще раз, щоб поставити"); return; }
   S.armedCell = -1;
-  act("b", c, S.buildType);
+  act("b", c, S.buildType); playSound("build");
   sendHover(true);
 }
 

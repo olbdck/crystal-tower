@@ -45,6 +45,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 /* ---------- top bar ---------- */
 .topbar { grid-area: top; display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 12px; pointer-events: none; padding-bottom: 24px; }
 .topleft { justify-self: start; display: flex; gap: 8px; align-items: flex-start; pointer-events: auto; }
+.topright { justify-self: end; display: flex; gap: 12px; align-items: flex-start; pointer-events: none; }
+.tools { display: flex; gap: 8px; align-items: center; pointer-events: auto; margin-top: 4px; }
 .plaque {
   background: linear-gradient(180deg, var(--wood-2), var(--wood-1));
   border-radius: 10px; padding: 6px 14px 7px;
@@ -70,6 +72,19 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 }
 .roundbtn:hover { filter: brightness(1.15); }
 .roundbtn svg { width: 16px; height: 16px; }
+.soundwrap { position: relative; }
+#soundBtn .cross { display: none; }
+#soundBtn.muted .cross { display: inline; }
+#soundBtn.muted .waves { display: none; }
+.soundpop {
+  position: absolute; right: 0; top: 46px; z-index: 40; width: 190px; padding: 10px 12px; border-radius: 10px; text-align: left;
+  background: linear-gradient(180deg, var(--parch-2), var(--parch-1)); color: var(--ink);
+  box-shadow: 0 0 0 2px var(--gold-0), 0 0 0 4px var(--wood-0), 0 10px 20px rgba(0, 0, 0, .55);
+  display: flex; flex-direction: column; gap: 6px; font-family: var(--font-label); font-size: 13px;
+}
+.soundpop[hidden] { display: none; }
+.soundpop input[type=range] { width: 100%; accent-color: #9a7424; }
+.soundpop .mute { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .speedbtn { font-family: var(--font-display); font-size: 17px; }
 .roundbtn.wait { box-shadow: 0 0 0 3px var(--gold-0), 0 0 0 5px var(--wood-0), 0 0 10px 2px rgba(241, 205, 106, .35); animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { filter: brightness(1.25); } }
@@ -454,10 +469,16 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--gold-2); ou
 }
 /* phones: the wave banner gets its own row under the plaque and the crystal */
 @media (max-width: 560px) {
-  .topbar { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "left . gem" "banner banner banner"; row-gap: 4px; }
+  /* row 1: plaque and round buttons; row 2: wave banner and the crystal */
+  .topbar { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "left tools tools" "banner banner gem"; row-gap: 6px; column-gap: 8px; }
   .topleft { grid-area: left; }
-  .lifegem { grid-area: gem; }
-  .banner { grid-area: banner; justify-self: center; width: min(100%, 340px); padding-block: 4px; }
+  .topright { display: contents; }
+  .tools { grid-area: tools; justify-self: end; gap: 5px; margin-top: 2px; }
+  .tools .roundbtn { width: 32px; height: 32px; font-size: 16px; }
+  .tools .speedbtn { font-size: 14px; }
+  .soundpop { top: 40px; }
+  .lifegem { grid-area: gem; align-self: center; }
+  .banner { grid-area: banner; justify-self: stretch; padding-block: 4px; min-width: 0; }
   .banner .wave { font-size: 19px; }
   .banner .sub { font-size: 13px; }
 }

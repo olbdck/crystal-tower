@@ -6,6 +6,7 @@ import { act } from "../net/session.js";
 import { getView } from "../net/view.js";
 import { mySeat, myGold, myOffer, myHand, castPending } from "../game.js";
 import { $, toast } from "./dom.js";
+import { playSound } from "../audio/sound.js";
 
 // Line icons on a 24x24 grid, drawn with the current text colour.
 const PATHS = {
@@ -53,7 +54,7 @@ export function openOffer() {
   offer.forEach((code, slot) => {
     const b = cardElement(code, "big");
     b.addEventListener("click", () => {
-      act("k", slot);
+      act("k", slot); playSound("upgrade");
       $("cardOverlay").hidden = true;
       const c = cardOf(code);
       toast(c.spell ? `«${c.name}» у руці. Застосуйте її під час хвилі` : `«${c.name}» діє до кінця гри`);
@@ -71,6 +72,7 @@ function watchOffer(v) {
   if (key === shownOffer) return;
   shownOffer = key;
   if (!key) { $("cardOverlay").hidden = true; return; }
+  playSound("card");
   openOffer(); // a new pick: show it (closing it any way just postpones it)
 }
 

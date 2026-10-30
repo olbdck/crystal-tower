@@ -25,3 +25,22 @@ test("on a phone the table is in front of the fog, not lost in it", async ({ bro
   expect(a.errors).toEqual([]);
   await a.context.close();
 });
+
+test("every sound plays without errors once the page was clicked", async ({ browser }) => {
+  const a = await openGame(browser);
+  const logs = [];
+  a.page.on("console", m => { if (m.type() === "error") logs.push(m.text()); });
+  await sitDown(a.page, "Олег");
+  await a.page.mouse.click(5, 400);
+  await a.page.waitForTimeout(300); // the audio context starts
+  const played = await a.page.evaluate(async () => {
+    const k = window.__kv, out = [];
+    for (const n of k.SOUND_NAMES()) { if (k.playSound(n, { pan: 0.3 })) out.push(n); await new Promise(r => setTimeout(r, 30)); }
+    return out;
+  });
+  expect(played.length).toBeGreaterThan(20);
+  await a.page.waitForTimeout(500);
+  expect(logs.filter(l => l.startsWith("sound"))).toEqual([]);
+  expect(a.errors).toEqual([]);
+  await a.context.close();
+});

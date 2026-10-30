@@ -7,6 +7,7 @@ import { act, nameOfPeer } from "../net/session.js";
 import { getView } from "../net/view.js";
 import { mySeat } from "../game.js";
 import { $, toast } from "./dom.js";
+import { playSound } from "../audio/sound.js";
 
 // Keep these true to src/sim/rules.js and src/sim/cards.js when the rules change.
 export const FACTS = [
@@ -89,6 +90,7 @@ export function updatePause(v) {
   if (paused !== shown) {
     shown = paused;
     $("pauseOverlay").hidden = !paused;
+    playSound(paused ? "pause" : "resume");
     if (paused) nextFact();
   }
   if (paused) {

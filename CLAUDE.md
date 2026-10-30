@@ -34,6 +34,7 @@ PERF=1 npx playwright test tests/e2e/perf.spec.js   # render benchmark (draw cal
 | `src/net/session.js` | Tables, who hosts, keyframe requests, host handover, version check, rejoin, actions queue. |
 | `src/net/view.js` | `getView(now)`: what the renderer and HUD draw, interpolated between ticks. |
 | `src/render/` | Scene, models, instancing (towers/enemies as InstancedMesh), pooled effects, overlay, portraits. |
+| `src/audio/` | Synthesised sound effects (`sound.js`) and which game moment plays which (`cues.js`). |
 | `src/ui/` | HUD, input, join screen, modals, cards (`ui/cards.js`: the pick dialog, spells in hand, passive icons), pause (`ui/pause.js`, with the rule facts; keep them true when rules change). |
 | `src/state.js` | Shared runtime state `S` of the tab. |
 | `tests/unit/` | Rules, simulation, stream (host vs copy stays identical), balance. |

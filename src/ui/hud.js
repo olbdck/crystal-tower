@@ -12,6 +12,7 @@ import { portrait } from "../render/portraits.js";
 import { mySeat, myGold, myPv, myOffer } from "../game.js";
 import { updateCards, passiveIcons } from "./cards.js";
 import { updatePause } from "./pause.js";
+import { playSound } from "../audio/sound.js";
 import { $, ICON, toast, announce } from "./dom.js";
 import { refreshCardArt } from "./input.js";
 import { updateJoinCard, copyInvite } from "./join.js";
@@ -60,7 +61,11 @@ export function updateUI(v, now) {
   if (v && v.ph === 2 && !v.pz) { const s = document.createElement("span"); s.textContent = ` з ${MAX_WAVES}`; wl.appendChild(s); }
   $("phaseLine").textContent = sub;
 
+  if (v && lastPhase === 2 && v.ph === 1 && lastWave === v.w) playSound("cleared");
+  if (v && lastPhase !== null && lastPhase <= 2 && v.ph === 4) playSound("win");
+  if (v && lastPhase !== null && lastPhase <= 2 && v.ph === 3) playSound("lose");
   if (v && lastPhase !== null && v.ph === 2 && (lastPhase !== 2 || lastWave !== v.w)) {
+    playSound("wave");
     const boss = waveBosses(v.w, v.pc);
     announce(`Хвиля ${v.w}`, boss ? (boss > 1 ? `Колосів: ${boss}` : "Іде Колос") : v.w === MAX_WAVES ? "Остання" : "");
   }

@@ -5,8 +5,11 @@ import { S } from "./state.js";
 import { initNet, pump, setFxHandler, act, inviteLink, hostDebug, joinedPeers } from "./net/session.js";
 import { getView } from "./net/view.js";
 import { SEAT_CSS } from "./render/gfx.js";
-import { initThree, render3D, renderer, scene, camera, resizeAll, fitCamera, measureSafe, lastSafe, trackPerf, stage } from "./render/scene.js";
+import { initThree, render3D, renderer, scene, camera, proj, resizeAll, fitCamera, measureSafe, lastSafe, trackPerf, stage } from "./render/scene.js";
 import { spawnFx, fxStats } from "./render/fx.js";
+import { unlockAudio, playSound, SOUND_NAMES } from "./audio/sound.js";
+import { fxSound, setPanner } from "./audio/cues.js";
+import { initSoundControl } from "./ui/soundctl.js";
 import { $ } from "./ui/dom.js";
 import { updateUI, invalidateParty } from "./ui/hud.js";
 import { initInput } from "./ui/input.js";
@@ -37,7 +40,11 @@ function boot() {
   initInput();
   initCards();
   initPause();
-  setFxHandler(f => { if (renderer && !document.hidden) spawnFx(f); });
+  setFxHandler(f => { if (document.hidden) return; if (renderer) spawnFx(f); fxSound(f); });
+  setPanner((x, z) => (renderer ? proj(x, 0, z)[0] / Math.max(1, stage.clientWidth) * 2 - 1 : x / 10 - 1));
+  // browsers allow sound only after the first click or key press
+  for (const ev of ["pointerdown", "keydown"]) addEventListener(ev, unlockAudio, { capture: true });
+  initSoundControl();
   initNet();
   if (!TEST.noRender && !initThree()) $("fallback").hidden = false;
   new ResizeObserver(resizeAll).observe(stage);
@@ -49,4 +56,4 @@ function boot() {
 boot();
 
 // End-to-end tests drive the game through this handle; it exists only when a test set window.KV_TEST.
-if (TEST && Object.keys(TEST).length) window.__kv = { S, act, getView, inviteLink, hostDebug, joinedPeers, renderer: () => renderer, scene: () => scene, camera: () => camera, rules: R, fxStats };
+if (TEST && Object.keys(TEST).length) window.__kv = { S, act, getView, inviteLink, hostDebug, joinedPeers, renderer: () => renderer, scene: () => scene, camera: () => camera, rules: R, fxStats, playSound, SOUND_NAMES };

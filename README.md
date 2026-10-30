@@ -27,6 +27,8 @@ A tower you placed during the current break can be taken back for every coin you
 
 After the game a summary shows each player's kills, damage, gold earned, towers built, spells cast and gold given, with the best value in each column marked, and the tower that dealt the most damage.
 
+Sounds are synthesised in the browser (no audio files): shots of each tower, explosions, kills and gold, leaks, wave start and end, cards, spells and building. The speaker button next to the crystal sets the volume or mutes it; the setting is remembered.
+
 Keys: `F` finish the wave, `X` double speed, `P` pause, `1–4` towers, `5–7` spells, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
 
 ## Cards

@@ -1,4 +1,6 @@
 // Small DOM helpers used across the UI: element lookup, toasts, wave announcements, icons.
+import { playSound } from "../audio/sound.js";
+
 export const $ = id => document.getElementById(id);
 
 export const ICON = {
@@ -25,4 +27,4 @@ export function announce(main, sub) {
   setTimeout(() => { if (d.parentNode) d.remove(); }, 2100);
 }
 
-export function lifeHit() { const g = $("lifeGem"); g.classList.remove("hit"); void g.offsetWidth; g.classList.add("hit"); }
+export function lifeHit() { playSound("leak"); const g = $("lifeGem"); g.classList.remove("hit"); void g.offsetWidth; g.classList.add("hit"); }
