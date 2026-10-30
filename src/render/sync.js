@@ -12,6 +12,7 @@ import { ringBurst } from "./fx.js";
 import { lifeHit } from "../ui/dom.js";
 import { mySeat, myGold, canBuildAt } from "../game.js";
 import { S } from "../state.js";
+import { updateMates } from "./mates.js";
 
 // Per-tower and per-enemy data the effects and the overlay read (no meshes: those are instanced).
 export const towerObjs = new Map(); // cell -> { ty, lv, o, born, aim, aimT, top, bucket }
@@ -281,11 +282,11 @@ export function updateCursor(v, now) {
     }
   }
   if (!synKeyNow) setSynPreview("", null);
-  for (const p of S.peerList) {
-    if (p.sameTab || !p.presence || !Number.isInteger(p.presence.h)) continue;
-    const s = v.seats.indexOf(p.peer), h = p.presence.h;
-    if (s < 0 || h < 0 || h >= COLS * ROWS) continue;
-    const m = d.mates[s]; m.visible = true; m.position.set(h % COLS + 0.5, 0.014, ((h / COLS) | 0) + 0.5);
+  // teammates' pointers glide and fade (see mates.js)
+  for (const mt of updateMates(v, now)) {
+    const m = d.mates[mt.seat]; if (!m) continue;
+    m.visible = true; m.position.set(mt.x, 0.014, mt.z);
+    m.material.opacity = 0.38 * mt.a;
   }
   // my pending builds
   const want = new Set();

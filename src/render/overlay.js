@@ -4,6 +4,7 @@ import { SEAT_CSS } from "./gfx.js";
 import { renderer, octx, W, H, DPR, proj, cellPx } from "./scene.js";
 import { enemyObjs, synHint } from "./sync.js";
 import { bolts, floats } from "./fx.js";
+import { updateMates } from "./mates.js";
 import { cleanName } from "../net/session.js";
 import { S } from "../state.js";
 
@@ -49,17 +50,16 @@ export function drawOverlay(v, now) {
   }
   if (synHint) drawSynLabels(g, v, cp, now);
   g.font = `600 12px "Alegreya Sans SC", system-ui, sans-serif`;
-  for (const p of S.peerList) {
-    if (p.sameTab || !p.presence || !Number.isInteger(p.presence.h)) continue;
-    const s = v.seats.indexOf(p.peer), h = p.presence.h;
-    if (s < 0 || h < 0 || h >= COLS * ROWS) continue;
-    const nm = cleanName(p.presence.n); if (!nm) continue;
-    const [sx, sy] = proj(h % COLS + 0.5, 0.95, ((h / COLS) | 0) + 0.5);
+  for (const mt of updateMates(v, now)) {
+    const nm = mt.name; if (!nm) continue;
+    const [sx, sy] = proj(mt.x, 0.95, mt.z);
     const w = g.measureText(nm).width + 14;
-    g.fillStyle = SEAT_CSS[s]; rr(g, sx - w / 2, sy - 10, w, 20, 10); g.fill();
+    g.globalAlpha = mt.a;
+    g.fillStyle = SEAT_CSS[mt.seat]; rr(g, sx - w / 2, sy - 10, w, 20, 10); g.fill();
     g.lineWidth = 1.5; g.strokeStyle = "#1a0d04"; g.stroke();
     g.fillStyle = "#fff"; g.fillText(nm, sx, sy + 0.5);
   }
+  g.globalAlpha = 1;
 }
 
 function pill(g, sx, sy, text, bg, fg, size) {

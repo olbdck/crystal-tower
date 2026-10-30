@@ -111,7 +111,7 @@ function buildWorld() {
   decor.nextRing = part(cursorRoot, new THREE.RingGeometry(0.955, 1, 96), basic(0x8dff6a, { op: 0.9 }), 0, 0.024, 0, { rx: -Math.PI / 2, noShadow: true });
   decor.selRing = part(cursorRoot, new THREE.RingGeometry(0.44, 0.52, 40), basic(0xf1cd6a, { op: 0.95 }), 0, 0.03, 0, { rx: -Math.PI / 2, noShadow: true });
   decor.ghosts = TOWERS.map((_, i) => { const gm = towerModel(i, 1, MAT.ghost, MAT.ghost); gm.visible = false; cursorRoot.add(gm); return gm; });
-  decor.mates = [0, 1, 2, 3, 4].map(i => part(cursorRoot, new THREE.PlaneGeometry(0.94, 0.94), basic(SEAT_HEX[i], { op: 0.38 }), 0, 0.014, 0, { rx: -Math.PI / 2, noShadow: true }));
+  decor.mates = [0, 1, 2, 3, 4].map(i => part(cursorRoot, new THREE.CircleGeometry(0.42, 28), basic(SEAT_HEX[i], { op: 0.38 }), 0, 0.014, 0, { rx: -Math.PI / 2, noShadow: true }));
   for (const o of [decor.hoverTile, decor.rangeDisk, decor.rangeRing, decor.nextRing, decor.selRing, ...decor.mates]) o.visible = false;
   decor.pending = new Map();
   decor.synPrev = new THREE.Group(); decor.synPrevKey = ""; cursorRoot.add(decor.synPrev);
@@ -200,6 +200,16 @@ export function resizeAll() {
   if (renderer) { renderer.setPixelRatio(DPR); renderer.setSize(W, H, false); fitCamera(); }
 }
 
+/** The point on the board under the pointer, in cells ([x, z]), or null off the board. */
+export function pickPoint(clientX, clientY) {
+  if (!renderer) return null;
+  const r = glCanvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const p = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(groundPlane, p) || p.x < 0 || p.z < 0 || p.x >= COLS || p.z >= ROWS) return null;
+  return [p.x, p.z];
+}
 export function pickCell(clientX, clientY) {
   if (!renderer) return -1;
   const r = glCanvas.getBoundingClientRect();

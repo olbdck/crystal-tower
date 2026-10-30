@@ -10,6 +10,7 @@ import { spawnFx, fxStats } from "./render/fx.js";
 import { unlockAudio, playSound, SOUND_NAMES } from "./audio/sound.js";
 import { fxSound, setPanner } from "./audio/cues.js";
 import { initSoundControl } from "./ui/soundctl.js";
+import { updateMates } from "./render/mates.js";
 import { $ } from "./ui/dom.js";
 import { updateUI, invalidateParty } from "./ui/hud.js";
 import { initInput } from "./ui/input.js";
@@ -56,4 +57,4 @@ function boot() {
 boot();
 
 // End-to-end tests drive the game through this handle; it exists only when a test set window.KV_TEST.
-if (TEST && Object.keys(TEST).length) window.__kv = { S, act, getView, inviteLink, hostDebug, joinedPeers, renderer: () => renderer, scene: () => scene, camera: () => camera, rules: R, fxStats, playSound, SOUND_NAMES };
+if (TEST && Object.keys(TEST).length) window.__kv = { S, act, getView, inviteLink, hostDebug, joinedPeers, renderer: () => renderer, scene: () => scene, camera: () => camera, rules: R, fxStats, playSound, SOUND_NAMES, mates: () => updateMates(getView(performance.now()), performance.now()).map(m => ({ x: m.x, z: m.z, a: m.a, seat: m.seat })) };

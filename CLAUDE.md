@@ -57,7 +57,7 @@ PERF=1 npx playwright test tests/e2e/perf.spec.js   # render benchmark (draw cal
 5. A new player action: send it with `act("x", ...)` (up to 3 small integer arguments, see `cleanAction`)
    and handle it in `Sim.apply`. Validate everything in `apply`: actions come from other players' browsers.
 6. Presence fields (JSON, small): `n` name, `j` join time, `hid` tab hidden, `mob` touch device,
-   `v`/`vt` build id/time, `a` unacknowledged actions, `h`/`y` hovered cell and selected card, `H` epoch of
+   `v`/`vt` build id/time, `a` unacknowledged actions, `h`/`y` hovered cell and selected card, `hp` exact pointer point (tenths of a cell; teammates' screens glide it, see `render/mates.js`), `H` epoch of
    the game this player hosts. The host is whoever announces `H` and streams that epoch; the highest epoch
    wins, ties go to the smaller player id.
 7. Players at one table must run the same build (`BUILD` from the git commit). Do not weaken the version

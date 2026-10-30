@@ -4,7 +4,7 @@ import { TOWERS, BLOCKED, MAX_TOWERS } from "../sim/rules.js";
 import { buildCost, upCost } from "../sim/cards.js";
 import { getView } from "../net/view.js";
 import { act, setPresence } from "../net/session.js";
-import { pickCell, glCanvas } from "../render/scene.js";
+import { pickCell, pickPoint, glCanvas } from "../render/scene.js";
 import { portrait } from "../render/portraits.js";
 import { mySeat, myGold, myPv, myOffer, canBuildAt } from "../game.js";
 import { selectSpell, castAt, openOffer } from "./cards.js";
@@ -56,12 +56,18 @@ export function selectBuild(i) {
 
 /* ---------- where our pointer is, for teammates ---------- */
 let lastHoverSent = 0, pendingHover = null;
+// h: hovered cell; hp: the exact pointer position in tenths of a cell, so teammates' screens can glide it
+let hoverPoint = null;
 export function sendHover(force) {
   if (!S.joined) return;
   const now = performance.now();
-  const patch = { h: S.hoverCell >= 0 ? S.hoverCell : S.armedCell >= 0 ? S.armedCell : -1, y: S.buildType };
-  if (S.myPres.h === patch.h && S.myPres.y === patch.y) return;
-  if (!force && now - lastHoverSent < 110) { pendingHover = patch; return; }
+  const h = S.hoverCell >= 0 ? S.hoverCell : S.armedCell >= 0 ? S.armedCell : -1;
+  const hp = S.hoverCell >= 0 && hoverPoint ? [Math.round(hoverPoint[0] * 10), Math.round(hoverPoint[1] * 10)] : null;
+  const patch = { h, y: S.buildType, hp };
+  const old = S.myPres.hp;
+  const moved = hp ? !old || Math.abs(hp[0] - old[0]) + Math.abs(hp[1] - old[1]) >= 2 : !!old;
+  if (S.myPres.h === patch.h && S.myPres.y === patch.y && !moved) return;
+  if (!force && now - lastHoverSent < 66) { pendingHover = patch; return; }
   lastHoverSent = now; pendingHover = null;
   setPresence(patch);
 }
@@ -128,14 +134,16 @@ function onBoardClick(e) {
 let lastPointerType = "mouse";
 export function initInput() {
   buildCards();
-  setInterval(() => { if (pendingHover) { lastHoverSent = performance.now(); setPresence(pendingHover); pendingHover = null; } }, 120);
+  setInterval(() => { if (pendingHover) { lastHoverSent = performance.now(); setPresence(pendingHover); pendingHover = null; } }, 70);
 
   glCanvas.addEventListener("pointermove", e => {
     if (e.pointerType !== "mouse") return;
     const c = pickCell(e.clientX, e.clientY);
-    if (c !== S.hoverCell) { S.hoverCell = c; sendHover(false); }
+    hoverPoint = pickPoint(e.clientX, e.clientY);
+    if (c !== S.hoverCell) S.hoverCell = c;
+    sendHover(false);
   });
-  glCanvas.addEventListener("pointerleave", () => { S.hoverCell = -1; sendHover(false); });
+  glCanvas.addEventListener("pointerleave", () => { S.hoverCell = -1; hoverPoint = null; sendHover(false); });
   glCanvas.addEventListener("pointerdown", e => { lastPointerType = e.pointerType || "mouse"; });
   glCanvas.addEventListener("contextmenu", e => { e.preventDefault(); cancelAll(); });
   glCanvas.addEventListener("click", onBoardClick);

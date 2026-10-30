@@ -252,3 +252,30 @@ test("double speed starts when everyone asks for it, for every player", async ({
   expect((await b.page.evaluate(() => window.__kv.hostDebug())).follow.resyncs).toBe(0);
   await a.context.close(); await b.context.close();
 });
+
+test("a teammate's pointer glides across the board instead of jumping", async ({ browser }) => {
+  const a = await openGame(browser);
+  await sitDown(a.page, "Олег");
+  await waitView(a.page, v => v.host);
+  const hash = new URL(await a.page.evaluate(() => window.__kv.inviteLink())).hash;
+  const b = await openGame(browser, { path: "/" + hash });
+  await sitDown(b.page, "Марко");
+  await waitView(a.page, v => v.seats.filter(Boolean).length === 2);
+  // B's pointer, as its mouse would report it: the cell and the exact point in tenths of a cell
+  const point = (x, z) => b.page.evaluate(([x, z]) => window.__kv.S.room.presence({ h: Math.floor(z) * 20 + Math.floor(x), hp: [x * 10, z * 10] }), [x, z]);
+  await point(4.5, 5.5);
+  await a.page.waitForFunction(() => window.__kv.mates().some(m => m.a > 0.9 && Math.abs(m.x - 4.5) < 0.05), null, { timeout: 10_000, polling: 50 });
+  await point(14.5, 5.5);
+  // sampled on A while it travels (busy-waiting: background pages throttle timers)
+  await a.page.waitForFunction(() => window.__kv.mates()[0].x > 4.6, null, { timeout: 10_000, polling: 20 });
+  const xs = await a.page.evaluate(() => {
+    const out = [];
+    for (let i = 0; i < 30; i++) { const t = performance.now(); out.push(window.__kv.mates()[0].x); while (performance.now() - t < 15); }
+    return out;
+  });
+  const steps = xs.slice(1).map((x, i) => x - xs[i]);
+  expect(steps.every(d => d >= 0 && d < 4)).toBe(true); // moves forward a little each frame, never jumps
+  expect(xs.filter(x => x > 5 && x < 14).length).toBeGreaterThan(3); // in-between positions are shown
+  await a.page.waitForFunction(() => Math.abs(window.__kv.mates()[0].x - 14.5) < 0.05, null, { timeout: 5000, polling: 50 });
+  await a.context.close(); await b.context.close();
+});
