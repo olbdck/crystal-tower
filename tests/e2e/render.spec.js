@@ -44,3 +44,21 @@ test("every sound plays without errors once the page was clicked", async ({ brow
   expect(a.errors).toEqual([]);
   await a.context.close();
 });
+
+test("winning and losing look different: confetti and a crystal, or a skull on a dark table", async ({ browser }) => {
+  const a = await openGame(browser);
+  await sitDown(a.page, "Олег");
+  // one player alone: the test sets the end of the game directly on the host's Sim
+  await a.page.evaluate(() => { window.__kv.S.sim.ph = 4; });
+  await expect(a.page.locator("#endOverlay")).toHaveClass(/win/);
+  await expect(a.page.locator("#endArt .art-win")).toBeVisible();
+  await a.page.waitForFunction(() => { const c = document.getElementById("confetti"); return c.width > 0 && c.getContext("2d").getImageData(0, 0, c.width, c.height).data.some(x => x > 0); });
+  await a.page.click("#newGameBtn");
+  await expect(a.page.locator("#endOverlay")).toBeHidden();
+  await a.page.evaluate(() => { window.__kv.S.sim.ph = 3; });
+  await expect(a.page.locator("#endOverlay")).toHaveClass(/lose/);
+  await expect(a.page.locator("#endArt .art-lose")).toBeVisible();
+  await expect(a.page.locator("#endTitle")).toHaveText("Кристал розбито");
+  expect(a.errors).toEqual([]);
+  await a.context.close();
+});

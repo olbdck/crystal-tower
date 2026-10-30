@@ -12,6 +12,7 @@ import { portrait } from "../render/portraits.js";
 import { mySeat, myGold, myPv, myOffer } from "../game.js";
 import { updateCards, passiveIcons } from "./cards.js";
 import { updatePause } from "./pause.js";
+import { setEndScreen } from "./endscreen.js";
 import { playSound } from "../audio/sound.js";
 import { $, ICON, toast, announce } from "./dom.js";
 import { refreshCardArt } from "./input.js";
@@ -281,7 +282,7 @@ export function updateUI(v, now) {
 
   // end overlay
   const showEnd = !!v && v.ph >= 3 && $("joinOverlay").hidden;
-  $("endOverlay").hidden = !showEnd;
+  setEndScreen(showEnd ? (v.ph === 4 ? "win" : "lose") : null);
   if (showEnd) {
     $("endSign").className = "sign wide " + (v.ph === 4 ? "win" : "lose");
     $("endTitle").textContent = v.ph === 4 ? "Перемога!" : "Кристал розбито";
@@ -318,7 +319,7 @@ function renderSummary(v, seat) {
   ];
   const tb = $("endStats"); tb.textContent = "";
   const head = tb.createTHead().insertRow();
-  for (const h of ["Гравець", ...cols.map(c => c[0])]) { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); }
+  ["Гравець", ...cols.map(c => c[0])].forEach((h, k) => { const th = document.createElement("th"); th.textContent = h; if (k) th.className = "c" + (k - 1); head.appendChild(th); });
   const body = tb.createTBody();
   for (const i of seats) {
     const r = body.insertRow();
@@ -326,11 +327,11 @@ function renderSummary(v, seat) {
     const c0 = r.insertCell(); c0.className = "who";
     const dot = document.createElement("i"); dot.style.setProperty("--c", SEAT_CSS[i]);
     c0.append(dot, v.seats[i] ? nameOfPeer(v.seats[i]) : "Гравець");
-    for (const [, get, show] of cols) {
+    cols.forEach(([, get, show], k) => {
       const c = r.insertCell(), val = get(i), top = Math.max(...seats.map(get));
       c.textContent = show(val);
-      if (seats.length > 1 && val > 0 && val === top) c.className = "top";
-    }
+      c.className = "c" + k + (seats.length > 1 && val > 0 && val === top ? " top" : "");
+    });
   }
   const b = v.best;
   $("endBest").textContent = b ? `Найкраща вежа: ${TOWERS[b.ty].name} ${"★".repeat(b.lv)}` +
