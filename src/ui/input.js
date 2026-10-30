@@ -8,6 +8,7 @@ import { pickCell, glCanvas } from "../render/scene.js";
 import { portrait } from "../render/portraits.js";
 import { mySeat, myGold, myPv, myOffer, canBuildAt } from "../game.js";
 import { selectSpell, castAt, openOffer } from "./cards.js";
+import { togglePause } from "./pause.js";
 import { S } from "../state.js";
 import { $, ICON, toast } from "./dom.js";
 import { closeTopModal } from "./modals.js";
@@ -145,5 +146,6 @@ export function initInput() {
     else if (e.code === "KeyU") doUpgrade();
     else if (e.code === "KeyS") doSell();
     else if (e.code === "KeyR") doReady();
+    else if (e.code === "KeyP") togglePause();
   });
 }

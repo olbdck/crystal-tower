@@ -159,3 +159,21 @@ test("the crystal drips gold during a wave and pays the rest of the bonus at the
   assert.ok(dripCap(1) < waveBonus(1));
   assert.deepEqual(sim.gold.slice(0, 2), [waveBonus(1), waveBonus(1)], "drip plus the rest is the whole bonus");
 });
+
+test("a pause stops the wave and the break timer until someone resumes", () => {
+  const sim = table(2);
+  act(sim, 0, "r", 1); act(sim, 1, "r", 1);
+  for (let i = 0; i < 90; i++) sim.step(STEP);
+  const before = sim.enemies.map(e => e.d).join(), sp = sim.sp;
+  act(sim, 1, "p", 1);
+  assert.equal(sim.pz, 2);
+  sim.gold[0] = 1000;
+  act(sim, 0, "b", 5 * COLS + 4, 0);
+  assert.equal(sim.towers.size, 0, "no building in a paused wave");
+  for (let i = 0; i < 300; i++) sim.step(STEP);
+  assert.equal(sim.enemies.map(e => e.d).join(), before);
+  assert.equal(sim.sp, sp);
+  act(sim, 0, "p", 0);
+  sim.step(STEP);
+  assert.notEqual(sim.enemies.map(e => e.d).join(), before, "anyone can resume");
+});

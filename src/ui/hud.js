@@ -11,6 +11,7 @@ import { otherOwners, synKey } from "../render/sync.js";
 import { portrait } from "../render/portraits.js";
 import { mySeat, myGold, myPv, myOffer } from "../game.js";
 import { updateCards, passiveIcons } from "./cards.js";
+import { updatePause } from "./pause.js";
 import { $, ICON, toast, announce } from "./dom.js";
 import { refreshCardArt } from "./input.js";
 import { updateJoinCard, copyInvite } from "./join.js";
@@ -52,9 +53,11 @@ export function updateUI(v, now) {
     else if (v.ph === 3) { main = "Кристал розбито"; sub = `Команда дійшла до хвилі ${v.w}`; }
     else if (v.ph === 4) { main = "Перемога"; sub = "Кристал вистояв усі 20 хвиль"; }
   }
+  if (v && v.pz && v.ph <= 2) { main = "Пауза"; sub = `Поставив(-ла) ${nameOfPeer(v.seats[v.pz - 1])}`; }
+  updatePause(v);
   const wl = $("waveLine");
   wl.textContent = main;
-  if (v && v.ph === 2) { const s = document.createElement("span"); s.textContent = ` з ${MAX_WAVES}`; wl.appendChild(s); }
+  if (v && v.ph === 2 && !v.pz) { const s = document.createElement("span"); s.textContent = ` з ${MAX_WAVES}`; wl.appendChild(s); }
   $("phaseLine").textContent = sub;
 
   if (v && lastPhase !== null && v.ph === 2 && (lastPhase !== 2 || lastWave !== v.w)) {

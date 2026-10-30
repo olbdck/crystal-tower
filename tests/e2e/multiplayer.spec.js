@@ -180,3 +180,27 @@ for (const p2p of [true, false]) {
     await a.context.close(); await b.context.close();
   });
 }
+
+test("any player can pause the game for everyone, and anyone can resume it", async ({ browser }) => {
+  const a = await openGame(browser);
+  await sitDown(a.page, "Олег");
+  await waitView(a.page, v => v.host);
+  const hash = new URL(await a.page.evaluate(() => window.__kv.inviteLink())).hash;
+  const b = await openGame(browser, { path: "/" + hash });
+  await sitDown(b.page, "Марко");
+  await waitView(a.page, v => v.seats.filter(Boolean).length === 2);
+  await waitView(b.page, v => v.mySeat === 1);
+  await b.page.keyboard.press("KeyP");
+  for (const p of [a.page, b.page]) {
+    await expect(p.locator("#pauseOverlay")).toBeVisible();
+    await expect(p.locator("#pauseFact")).not.toBeEmpty();
+  }
+  await expect(a.page.locator("#pauseWho")).toContainText("Марко");
+  const t0 = await a.page.evaluate(() => window.__kv.S.sim.tm);
+  await a.page.waitForTimeout(1000);
+  expect(await a.page.evaluate(() => window.__kv.S.sim.tm)).toBe(t0);
+  await a.page.click("#pauseGo");
+  for (const p of [a.page, b.page]) await expect(p.locator("#pauseOverlay")).toBeHidden();
+  expect(a.errors).toEqual([]); expect(b.errors).toEqual([]);
+  await a.context.close(); await b.context.close();
+});

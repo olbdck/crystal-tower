@@ -17,7 +17,9 @@ The in-game interface is in Ukrainian.
 - A wave starts when everyone is ready, or after a 20-second break. There are 20 waves; every fifth one brings a boss.
 - Each player has their own gold. A kill pays half its bounty to the owner of the tower that landed it; the other half is shared equally by everyone at the table, so nobody is left without income. During a wave the crystal also gives everyone 1 gold a second, up to half of the wave bonus; the rest of the bonus comes when the wave is cleared.
 
-Keys: `1–4` towers, `5–7` spells, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
+Any seated player can pause the game for everyone with the pause button or `P`, and anyone can resume it; while paused, the sign shows a fact from the rules. A paused wave stands still: no building, upgrading, selling or spells until it goes on.
+
+Keys: `P` pause, `1–4` towers, `5–7` spells, `U` upgrade, `S` sell, `R` ready, `Esc` cancel.
 
 ## Cards
 

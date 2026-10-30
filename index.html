@@ -36,6 +36,7 @@
           <div class="net" id="net"><span class="dot"></span><span id="netText">Підключення…</span><button class="codebtn" id="codeBtn" type="button" hidden title="Скопіювати код столу" aria-label="Скопіювати код столу"><span id="codeTxt"></span><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8.5" height="8.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3.5 10.5h-.5A1.5 1.5 0 0 1 1.5 9V3A1.5 1.5 0 0 1 3 1.5h6A1.5 1.5 0 0 1 10.5 3v.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button></div>
         </div>
         <button class="roundbtn" id="helpBtn" type="button" aria-label="Як грати">?</button>
+        <button class="roundbtn" id="pauseBtn" type="button" hidden title="Пауза (P)" aria-label="Пауза"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="2.5" width="3" height="11" rx="1" fill="currentColor"/><rect x="9.5" y="2.5" width="3" height="11" rx="1" fill="currentColor"/></svg></button>
       </div>
       <div class="banner">
         <div class="wave" id="waveLine">Хвиля 0 <span>з 20</span></div>
@@ -181,6 +182,21 @@
     </div>
   </div>
 
+  <div class="modal" id="pauseOverlay" hidden>
+    <div class="sign">
+      <div class="inner">
+        <h2>Пауза</h2>
+        <p id="pauseWho"></p>
+        <div class="fact">
+          <b>Чи знали ви?</b>
+          <p id="pauseFact"></p>
+          <button class="linkbtn" id="pauseFactNext" type="button">Ще один факт</button>
+        </div>
+        <button class="btn" id="pauseGo" type="button">Продовжити <small>(P)</small></button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="rulesOverlay" hidden>
     <div class="sign">
       <div class="inner">
@@ -193,7 +209,7 @@
           <li><b>Карти:</b> після кожної третьої хвилі кожен обирає 1 з 3 карт. Пасивна діє на ваші вежі до кінця гри; «Єдність» (синергія між власними вежами різних типів) пропонується щоразу, доки її не візьмете. Магія коштує золота, застосовується раз під час хвилі (клавіші <b>5–7</b>) і зникає.</li>
           <li>Хвиля стартує, коли всі натиснули «Готовий», або після 20 с перерви. Усього 20 хвиль, кожна п’ята з Колосом.</li>
           <li>Грати разом: натисніть «Запросити» на вільному місці, посилання на ваш стіл скопіюється. Більше гравців — більше ворогів.</li>
-          <li>Клавіші: <b>1–4</b> вежі, <b>U</b> покращити, <b>S</b> продати, <b>R</b> готовий, <b>Esc</b> скасувати.</li>
+          <li>Клавіші: <b>P</b> пауза, <b>1–4</b> вежі, <b>U</b> покращити, <b>S</b> продати, <b>R</b> готовий, <b>Esc</b> скасувати.</li>
         </ul>
         <button class="btn" id="rulesClose" type="button">Зрозуміло</button>
       </div>

@@ -13,6 +13,7 @@ import { initInput } from "./ui/input.js";
 import { initJoin } from "./ui/join.js";
 import { initModals } from "./ui/modals.js";
 import { initCards } from "./ui/cards.js";
+import { initPause } from "./ui/pause.js";
 
 let lastUi = 0, lastFitCheck = 0, lastLoopTime = performance.now();
 
@@ -35,6 +36,7 @@ function boot() {
   initJoin();
   initInput();
   initCards();
+  initPause();
   setFxHandler(f => { if (renderer && !document.hidden) spawnFx(f); });
   initNet();
   if (!TEST.noRender && !initThree()) $("fallback").hidden = false;

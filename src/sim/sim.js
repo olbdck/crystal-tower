@@ -18,7 +18,7 @@ export class Sim {
   }
   reset(seats) {
     this.ph = 1; this.w = 0; this.l = START_LIVES; this.tm = -1; this.sp = 0; this.sc = 0; this.pc = 1; this.hs = 1; this.wt = 0;
-    this.bk = START_GOLD; this.u = 0;
+    this.bk = START_GOLD; this.u = 0; this.pz = 0; // pz: seat+1 of the player who paused the game, 0 = running
     this.seats = seats.slice();
     this.gold = [0, 0, 0, 0, 0].map(() => START_GOLD);
     this.kills = [0, 0, 0, 0, 0];
@@ -63,7 +63,12 @@ export class Sim {
     for (const k of [...this.ak.keys()]) if (expired(k)) this.ak.delete(k);
     for (const k of [...this.gone.keys()]) if (expired(k)) this.gone.delete(k);
   }
-  clearCards(i) { const had = this.pv[i]; this.pv[i] = 0; this.hand[i] = []; this.offer[i] = []; this.gr[i] = 0; if (had) this.recomputeSyn(); }
+  clearCards(i) {
+    if (this.pz === i + 1) this.pz = 0; // a pause by a player who is gone for good ends
+    const had = this.pv[i];
+    this.pv[i] = 0; this.hand[i] = []; this.offer[i] = []; this.gr[i] = 0;
+    if (had) this.recomputeSyn();
+  }
   freeSeat(i) {
     this.seats[i] = ""; this.ready[i] = false; this.clearCards(i);
     this.u &= ~(1 << i);
@@ -79,6 +84,9 @@ export class Sim {
   }
   apply(seat, it) {
     const code = it[1];
+    if (code === "p") { if (this.ph <= 2) this.pz = it[2] ? seat + 1 : 0; return; }
+    // a paused wave stands still: no building, upgrading, selling or spells until it goes on
+    if (this.pz && this.ph === 2 && (code === "b" || code === "u" || code === "s" || code === "m")) return;
     if (code === "b") {
       const cell = it[2], ty = it[3];
       if (!Number.isInteger(cell) || cell < 0 || cell >= COLS * ROWS || !Number.isInteger(ty) || ty < 0 || ty >= TOWERS.length) return;
@@ -167,6 +175,7 @@ export class Sim {
     this.t++;
     // a seat held for a player who dropped out is released when the wait runs out
     if (this.gone.size && this.t % 30 === 0) this.assignSeats(this.roster);
+    if (this.pz) { for (const e of this.enemies) e.pd = e.d; return; } // paused: time stands still
     if (this.ph === 1) {
       const occ = this.present();
       if (occ.length && occ.every(i => this.ready[i])) this.startWave();
@@ -306,7 +315,7 @@ export class Sim {
   /** A checksum of the whole game state. Copies compare it with the host's to catch any divergence. */
   stateHash() {
     let h = 2166136261 | 0;
-    for (const x of [this.t, this.ph, this.w, this.l, this.tm, this.sp, this.sc, this.pc, this.hs, this.bk, this.u, this.nid, this.wt]) h = mix(h, x);
+    for (const x of [this.t, this.ph, this.w, this.l, this.tm, this.sp, this.sc, this.pc, this.hs, this.bk, this.u, this.nid, this.wt, this.pz]) h = mix(h, x);
     for (let i = 0; i < MAX_SEATS; i++) {
       h = mix(h, this.gold[i]); h = mix(h, this.kills[i]); h = mix(h, this.ready[i] ? 1 : 0); h = mix(h, this.pv[i]); h = mix(h, this.gr[i]);
       for (const c of this.hand[i]) h = mix(h, c + 100);
