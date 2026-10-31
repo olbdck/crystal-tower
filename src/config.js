@@ -6,6 +6,10 @@ export const TEST = (typeof window !== "undefined" && window.KV_TEST) || {};
 // Players at one table must run the same build; see the version check in net/session.js.
 export const BUILD = TEST.build || (typeof __BUILD__ !== "undefined" ? __BUILD__ : { id: "src", t: 0 });
 
+// Anonymous play statistics (Google Analytics 4), see src/analytics/. They are sent only by the published
+// game: an id is set and the page is served from one of these hosts. An empty id turns them off.
+export const ANALYTICS = { id: "", hosts: ["olbdck.github.io"] };
+
 // Network settings. Tests and self-hosters can override any field with window.KV_NET_CONFIG.
 // Players talk directly browser-to-browser over WebRTC data channels, one channel per pair of players.
 // A public MQTT broker over WSS is used to find each other, to exchange connection offers (signaling),

@@ -24,6 +24,16 @@ test("a card pick opens by itself, and spells are cast from the hand during a wa
   const slowed = await a.page.evaluate(() => window.__kv.S.sim.enemies.every(e => e.sl > 3));
   expect(slowed).toBe(true);
   await expect(a.page.locator("#hand .card.spell")).toHaveCount(0);
+
+  // the same moments would go to the play statistics (tests never load Google Analytics)
+  const events = await a.page.evaluate(() => window.__kv.events());
+  const names = events.map(e => e.event);
+  for (const n of ["table_join", "card_pick", "tower_build", "game_start", "spell_cast"]) expect(names).toContain(n);
+  expect(events.find(e => e.event === "card_pick")).toMatchObject({ card: "Загартування", kind: "passive", offered: "Загартування, Хуртовина, Єдність" });
+  expect(events.find(e => e.event === "game_start")).toMatchObject({ players: 1, role: "host", late: 0 });
+  expect(events.find(e => e.event === "spell_cast")).toMatchObject({ spell: "Хуртовина", wave: 1 });
+  expect(JSON.stringify(events)).not.toContain("Олег"); // never player names
+  expect(await a.page.evaluate(() => typeof window.gtag)).toBe("undefined");
   expect(a.errors).toEqual([]);
   await a.context.close();
 });

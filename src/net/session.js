@@ -389,9 +389,14 @@ function sendKeyframeTo(label, now) {
   countOut(kf);
 }
 
+let actionListener = null;
+/** Lets the play statistics hear our own actions as they are sent (see analytics/watch.js). */
+export function setActionListener(fn) { actionListener = fn; }
+
 /** Send one of our actions to the host: ["b", cell, type], ["u", cell], ["s", cell], ["r", 0|1], ["g", seat], ["n"]. */
 export function act(code, a1, a2) {
   if (!S.joined) return;
+  if (actionListener) { try { actionListener(code, a1, a2); } catch (e) { console.error(e); } }
   seq++;
   const it = [seq, code];
   if (a1 !== undefined) it.push(a1);

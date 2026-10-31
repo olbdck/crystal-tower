@@ -85,6 +85,33 @@ A tower deals +15% damage for every *other* player whose tower stands on one of 
 
 Note: public brokers are open, so anyone who knows a table code could read that table's game messages. The game sends nothing beyond player names and game state.
 
+## Play statistics
+
+The published game sends anonymous play statistics to Google Analytics 4, so we can see how it is played
+and what to improve. Only the build served from `olbdck.github.io` sends them, and only when
+`ANALYTICS.id` in `src/config.js` is set; local development, tests and forks send nothing. Player names,
+table codes and anything typed by players are never sent, and the page address goes out without the
+table code. Ad blockers usually block the script, so the numbers undercount.
+
+Events (`src/analytics/events.js`), each with the wave it happened in:
+
+| Event | When | Parameters |
+|---|---|---|
+| `table_join` | the player sits down | `via`: invite, own or solo |
+| `game_start` | the first wave the player sits in | `players`, `role` (host or guest), `late` (sat down mid-game) |
+| `game_end` | win or loss | `result`, `wave`, `players`, `role`, `minutes`, `lives`, `passives`, `spells_cast`, `towers_built`, `fps`, `link` (direct, relay, server, solo), `resyncs` |
+| `game_quit` | the tab closes mid-game | `wave`, `players`, `role`, `minutes` |
+| `tower_build`, `tower_upgrade`, `tower_sell` | the player's own actions | `tower`, `level`, `undo` |
+| `card_pick` | a card chosen out of three | `card`, `kind`, `offered` |
+| `spell_cast` | a spell used | `spell` |
+| `feature_use` | pause, speed ×2, finish the wave, gift, new game | `feature` |
+| `host_takeover` | this player took over hosting mid-game | `players` |
+| `version_mismatch` | the table runs another build | `mine`: newer or older |
+| `webgl_unavailable` | the browser cannot draw 3D | |
+
+To see the parameters in GA reports, register them as custom dimensions (Admin → Custom definitions).
+Open the game with `?gadebug` to watch your own events arrive in the GA DebugView.
+
 ## Network settings
 
 Network settings live in `NET_CONFIG` in `src/config.js`.

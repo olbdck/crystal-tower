@@ -35,6 +35,7 @@ PERF=1 npx playwright test tests/e2e/perf.spec.js   # render benchmark (draw cal
 | `src/net/view.js` | `getView(now)`: what the renderer and HUD draw, interpolated between ticks. |
 | `src/render/` | Scene, models, instancing (towers/enemies as InstancedMesh), pooled effects, overlay, portraits. |
 | `src/audio/` | Synthesised sound effects (`sound.js`) and which game moment plays which (`cues.js`). |
+| `src/analytics/` | Play statistics (GA4): `events.js` decides which moments and actions become events (pure, unit tested), `watch.js` wires it to the game, `ga.js` loads gtag only on the published host. Never send player names or table codes. |
 | `src/ui/hand.js` | The fanned hand of cards (layout by count, hover spread); a scrolling row on phones. |
 | `src/ui/` | HUD, input, join screen, modals, cards (`ui/cards.js`: the pick dialog, spells in hand, passive icons), pause (`ui/pause.js`, with the rule facts; keep them true when rules change). |
 | `src/state.js` | Shared runtime state `S` of the tab. |
